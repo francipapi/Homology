@@ -1,14 +1,18 @@
 # Homology Configuration
 computation:
-  max_dimension: 3
-  max_edge_length: 1.0
-  min_persistence: 0.0
+  max_dimension: 3      # Maximum homology dimension to compute (e.g., H0, H1, H2)
+  max_edge_length: 1.0  # Maximum edge length for the Vietoris-Rips complex construction
+  min_persistence: 0.0  # Minimum persistence value for a topological feature to be considered significant
+                        # Note: This parameter is available in Gudhi but not currently utilized by the 
+                        # `compute_persistent_homology` function in `src/topology/homology.py` via `main.py`.
 
+# The 'parallel' and 'output' sections below are not currently used by the main.py workflow.
+# They might be relevant for other scripts or future enhancements.
 parallel:
-  enabled: true
-  num_workers: 4
+  enabled: true         # Placeholder for enabling parallel computation
+  num_workers: 4        # Placeholder for number of workers for parallel computation
 
 output:
-  save_diagrams: true
-  save_betti: true
-  save_persistence: true
+  save_diagrams: true   # Placeholder for flag to save persistence diagrams
+  save_betti: true      # Placeholder for flag to save Betti numbers
+  save_persistence: true # Placeholder for flag to save full persistence data

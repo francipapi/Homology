@@ -1,17 +1,22 @@
 # Training Configuration
 model:
-  width: 32
-  layers: 8
-  activation: 'relu'
-  output_activation: 'sigmoid'
+  width: 32           # Number of neurons per hidden layer
+  layers: 8           # Number of dense hidden layers
+  activation: 'relu'  # Activation function for hidden layers (conceptual, not directly used by current PyTorch model)
+  output_activation: 'sigmoid' # Activation function for output layer (conceptual, not directly used by current PyTorch model)
 
 training:
   epochs: 100
   batch_size: 32
   learning_rate: 0.001
-  early_stopping_patience: 75
-  device: 'auto'  # auto, cpu, cuda, mps
+  early_stopping_patience: 75 # Number of epochs with no improvement after which training will be stopped
+  device: 'auto'      # Training device: 'auto', 'cpu', 'cuda', 'mps'
+  seed: 42            # Random seed for PyTorch and NumPy for reproducible training runs
 
 data:
-  test_size: 0.2
-  random_seed: 52
+  test_size: 0.2      # Proportion of the dataset to include in the test split
+  random_seed: 52     # Random seed for data splitting (e.g., train_test_split)
+  generation:
+    n: 1000           # Number of data points to generate
+    big_radius: 3     # Radius of the larger circle of the torus
+    small_radius: 1   # Radius of the smaller circle (tube) of the torus
