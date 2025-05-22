@@ -1,0 +1,14 @@
+# Homology Configuration
+computation:
+  max_dimension: 3
+  max_edge_length: 1.0
+  min_persistence: 0.0
+
+parallel:
+  enabled: true
+  num_workers: 4
+
+output:
+  save_diagrams: true
+  save_betti: true
+  save_persistence: true
