@@ -10,25 +10,12 @@ NC='\033[0m' # No Color
 print_message() {
     echo -e "${2}${1}${NC}"
 }
-#hello
 
 # Function to handle errors
 handle_error() {
     print_message "Error: $1" "$RED"
-    # Cleanup any hanging processes
-    pkill -f pytest
     exit 1
 }
-
-# Function to cleanup on exit
-cleanup() {
-    print_message "Cleaning up..." "$YELLOW"
-    pkill -f pytest
-    conda deactivate
-}
-
-# Set up trap for cleanup
-trap cleanup EXIT
 
 # Check if conda is installed
 if ! command -v conda &> /dev/null; then
@@ -52,27 +39,29 @@ pip install -r requirements.txt
 # Set PYTHONPATH to include the current directory
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
-# Set environment variables to help with test collection
-export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
-export PYTEST_ADDOPTS="--tb=short"
+# Check if config files exist
+if [ ! -f "configs/training_config.yaml" ]; then
+    handle_error "training_config.yaml not found in configs directory"
+fi
+if [ ! -f "configs/homology_config.yaml" ]; then
+    handle_error "homology_config.yaml not found in configs directory"
+fi
+if [ ! -f "configs/visualization_config.yaml" ]; then
+    handle_error "visualization_config.yaml not found in configs directory"
+fi
 
-# Run tests with timeout and specific options to prevent hanging
-print_message "Running tests..." "$YELLOW"
-pytest tests/ -v \
-    --durations=10 \
-    --maxfail=1 \
-    --tb=short \
-    --capture=no \
-    --disable-pytest-warnings \
-    --no-header \
-    --no-summary \
-    --showlocals
+# Create results directories if they don't exist
+mkdir -p results/models results/plots results/homology
 
-# Check if tests passed
+# Run main.py
+print_message "Running main.py..." "$YELLOW"
+python main.py
+
+# Check if main.py executed successfully
 if [ $? -eq 0 ]; then
-    print_message "All tests passed successfully!" "$GREEN"
+    print_message "Pipeline completed successfully!" "$GREEN"
 else
-    print_message "Some tests failed!" "$RED"
+    print_message "Pipeline failed!" "$RED"
     exit 1
 fi
 

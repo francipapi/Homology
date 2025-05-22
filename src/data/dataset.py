@@ -78,13 +78,14 @@ def gen_easy(n, big_radius, small_radious):
     y = np.concatenate((np.zeros((n,1)), np.ones((n,1))))
     return [X,y]
 
-def plot_torus_points(X, y):
+def plot_torus_points(X, y, filename=None):
     """
     Plots the generated torus points using Plotly.
 
     Parameters:
     - X (numpy.ndarray): Array of shape (N, 3) representing the 3D coordinates.
     - y (numpy.ndarray): Labels corresponding to each point in X.
+    - filename (str or Path, optional): If provided, saves the plot to this file instead of displaying it.
     """
     # Extract x, y, z coordinates
     x_coords = X[:, 0]
@@ -119,8 +120,11 @@ def plot_torus_points(X, y):
         margin=dict(l=0, r=0, b=0, t=30)
     )
 
-    # Show the figure
-    fig.show()
+    # Show the figure or save it to a file
+    if filename:
+        fig.write_image(str(filename))
+    else:
+        fig.show()
 
 def farthest_point_sampling(point_cloud, num_samples):
     """

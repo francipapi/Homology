@@ -104,9 +104,8 @@ def main():
             
             # Compute the distance matrix for the current layer's activation data.
             # The distance matrix is a prerequisite for constructing the Rips complex.
-            # Local import to prevent potential circular dependencies if utils.distance evolves.
-            from src.utils.distance import compute_distance_matrix
-            dist_matrix = compute_distance_matrix(layer_activation_data)
+            from src.utils.graph import distance
+            dist_matrix = distance(layer_activation_data, k=homology_config['computation']['num_neighbors'])
             print(f"    Distance matrix computed for layer {i+1}, shape: {dist_matrix.shape}.")
             
             # Define specific filenames for this layer's homology outputs.
