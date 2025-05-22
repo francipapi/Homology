@@ -10,6 +10,7 @@ NC='\033[0m' # No Color
 print_message() {
     echo -e "${2}${1}${NC}"
 }
+#hello
 
 # Function to handle errors
 handle_error() {
