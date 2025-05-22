@@ -1,15 +1,21 @@
 # Visualization Configuration
-plotting:
-  figure_size: [12, 8]
-  dpi: 100
-  style: 'seaborn'
 
-curves:
-  show_statistics: true
-  colors: ['blue', 'green', 'orange']
-  alpha: 0.1
-  linewidth: 2
+# Note: The parameters in this file are intended for general plotting utilities.
+# The current `main.py` script calls `plot_curves_from_h5` for Betti curves
+# directly and may not utilize all of these settings without modification to `main.py`
+# to pass this configuration object to the plotting function.
+
+plotting:
+  figure_size: [12, 8]  # Default figure size (width, height) in inches for plots
+  dpi: 100              # Dots per inch for saved figures
+  style: 'seaborn-v0_8_whitegrid' # Matplotlib style to use (e.g., 'ggplot', 'seaborn-v0_8_whitegrid')
+
+curves: # Parameters specific to plotting curves (e.g., Betti curves)
+  show_statistics: true # Whether to show statistics (mean, std) on the curve plots
+  colors: ['blue', 'green', 'orange', 'red', 'purple'] # Default list of colors for curves
+  alpha: 0.1            # Alpha transparency for shaded areas (e.g., std deviation)
+  linewidth: 2          # Line width for plotted curves
 
 output:
-  format: 'png'
-  save_path: 'results/plots'
+  format: 'png'         # Default format for saved plots (e.g., 'png', 'pdf', 'svg')
+  save_path: 'results/plots' # Default directory to save generated plots
