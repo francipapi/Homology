@@ -1,0 +1,17 @@
+# Training Configuration
+model:
+  width: 32
+  layers: 8
+  activation: 'relu'
+  output_activation: 'sigmoid'
+
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.001
+  early_stopping_patience: 75
+  device: 'auto'  # auto, cpu, cuda, mps
+
+data:
+  test_size: 0.2
+  random_seed: 52

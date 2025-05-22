@@ -1,0 +1,15 @@
+# Visualization Configuration
+plotting:
+  figure_size: [12, 8]
+  dpi: 100
+  style: 'seaborn'
+
+curves:
+  show_statistics: true
+  colors: ['blue', 'green', 'orange']
+  alpha: 0.1
+  linewidth: 2
+
+output:
+  format: 'png'
+  save_path: 'results/plots'
