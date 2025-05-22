@@ -1,8 +1,11 @@
 # Homology Configuration
 computation:
-  max_dimension: 3      # Maximum homology dimension to compute (e.g., H0, H1, H2)
+  max_dimension: 2      # Maximum homology dimension to compute (e.g., H0, H1, H2)
   max_edge_length: 1.0  # Maximum edge length for the Vietoris-Rips complex construction
   min_persistence: 0.0  # Minimum persistence value for a topological feature to be considered significant
+                        # Note: This parameter is available in Gudhi but not currently utilized by the 
+                        # `compute_persistent_homology` function in `src/topology/homology.py` via `main.py`.
+  num_neighbors: 10     # Number of neighbors to use in k-nearest neighbors graph construction
                         # Note: This parameter is available in Gudhi but not currently utilized by the 
                         # `compute_persistent_homology` function in `src/topology/homology.py` via `main.py`.
 
