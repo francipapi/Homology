@@ -100,11 +100,11 @@ def test_data():
     start_time = time.time()
     try:
         with tqdm(total=100, desc="Generating test data", ncols=80) as pbar:
-            X, y = generate(
-                n=TEST_CONFIG['data']['n'],
-                big_radius=TEST_CONFIG['data']['big_radius'],
-                small_radius=TEST_CONFIG['data']['small_radius']
-            )
+        X, y = generate(
+            n=TEST_CONFIG['data']['n'],
+            big_radius=TEST_CONFIG['data']['big_radius'],
+            small_radius=TEST_CONFIG['data']['small_radius']
+        )
             pbar.update(100)
         timing_info = print_timing(start_time, "Data generation")
         print(f"\nGenerated {X.shape[0]} points in 3D space")
@@ -122,13 +122,13 @@ def test_data_generation(test_data):
     
     try:
         with tqdm(total=4, desc="Validating data", ncols=80) as pbar:
-            assert X.shape[0] == 2 * TEST_CONFIG['data']['n']  # Points per torus
+        assert X.shape[0] == 2 * TEST_CONFIG['data']['n']  # Points per torus
             pbar.update(1)
-            assert X.shape[1] == 3    # 3D points
+        assert X.shape[1] == 3    # 3D points
             pbar.update(1)
-            assert y.shape[0] == 2 * TEST_CONFIG['data']['n']  # One label per point
+        assert y.shape[0] == 2 * TEST_CONFIG['data']['n']  # One label per point
             pbar.update(1)
-            assert np.all(np.isin(y, [0, 1]))  # Binary labels
+        assert np.all(np.isin(y, [0, 1]))  # Binary labels
             pbar.update(1)
         
         timing_info = print_timing(start_time, "Data validation")
@@ -165,9 +165,9 @@ def test_model_training_reproducibility(test_data):
         # Verify outputs
         print("\nVerifying outputs...")
         with tqdm(total=len(layer_outputs_1), desc="Verifying outputs", ncols=80) as pbar:
-            for i in range(len(layer_outputs_1)):
-                assert np.array_equal(layer_outputs_1[i], layer_outputs_2[i]), \
-                    f"Layer {i} outputs are not identical between runs with the same seed."
+        for i in range(len(layer_outputs_1)):
+            assert np.array_equal(layer_outputs_1[i], layer_outputs_2[i]), \
+                f"Layer {i} outputs are not identical between runs with the same seed."
                 pbar.update(1)
 
         # Third run with different seed
@@ -176,11 +176,11 @@ def test_model_training_reproducibility(test_data):
         model_params_diff_seed['seed'] = model_params['seed'] + 1
         start_time_3 = time.time()
         with tqdm(total=model_params['epochs'], desc="Training Run 3", ncols=80) as pbar:
-            layer_outputs_3 = train(X, y, **model_params_diff_seed)
+        layer_outputs_3 = train(X, y, **model_params_diff_seed)
             pbar.update(model_params['epochs'])
         timing_3 = print_timing(start_time_3, "Third model training run")
         print(timing_3)
-
+        
         # Verify outputs are different
         print("\nVerifying outputs are different...")
         are_different = False
@@ -217,7 +217,7 @@ def test_homology_computation_file_output(tmp_path):
         print("\nComputing distance matrix...")
         start_time = time.time()
         with tqdm(total=1, desc="Distance matrix", ncols=80) as pbar:
-            dist_matrix = compute_distance_matrix(points)
+        dist_matrix = compute_distance_matrix(points)
             pbar.update(1)
         timing_1 = print_timing(start_time, "Distance matrix computation")
         print(timing_1)
@@ -226,14 +226,14 @@ def test_homology_computation_file_output(tmp_path):
         print("\nComputing persistent homology...")
         start_time = time.time()
         with tqdm(total=1, desc="Homology computation", ncols=80) as pbar:
-            betti_numbers = compute_persistent_homology(
-                dist_matrix,
-                max_dimension=TEST_CONFIG['homology']['max_dimension'],
-                max_edge_length=TEST_CONFIG['homology']['max_edge_length'],
+        betti_numbers = compute_persistent_homology(
+            dist_matrix,
+            max_dimension=TEST_CONFIG['homology']['max_dimension'],
+            max_edge_length=TEST_CONFIG['homology']['max_edge_length'],
                 diag_filename=str(diag_file),
-                plot_barcode_filename=str(barcode_file),
-                betti_filename=str(betti_file)
-            )
+            plot_barcode_filename=str(barcode_file),
+            betti_filename=str(betti_file)
+        )
             pbar.update(1)
         timing_2 = print_timing(start_time, "Homology computation")
         print(timing_2)
@@ -241,13 +241,13 @@ def test_homology_computation_file_output(tmp_path):
         # Verify outputs
         print("\nVerifying output files...")
         with tqdm(total=4, desc="File verification", ncols=80) as pbar:
-            assert len(betti_numbers) > 0, "Betti numbers list should not be empty."
+        assert len(betti_numbers) > 0, "Betti numbers list should not be empty."
             pbar.update(1)
-            assert diag_file.exists(), "Persistence diagram file was not created."
+        assert diag_file.exists(), "Persistence diagram file was not created."
             pbar.update(1)
-            assert barcode_file.exists(), "Barcode plot file was not created."
+        assert barcode_file.exists(), "Barcode plot file was not created."
             pbar.update(1)
-            assert betti_file.exists(), "Betti numbers file was not created."
+        assert betti_file.exists(), "Betti numbers file was not created."
             pbar.update(1)
         
         print(f"\nOutput files created in: {tmp_path}")
@@ -275,7 +275,7 @@ def test_pipeline_integration(test_data):
         print("\nComputing distance matrix...")
         start_time = time.time()
         with tqdm(total=1, desc="Distance matrix", ncols=80) as pbar:
-            dist_matrix = compute_distance_matrix(layer_outputs[0])
+        dist_matrix = compute_distance_matrix(layer_outputs[0])
             pbar.update(1)
         timing_2 = print_timing(start_time, "Distance matrix computation")
         print(timing_2)
@@ -284,11 +284,11 @@ def test_pipeline_integration(test_data):
         print("\nComputing persistent homology...")
         start_time = time.time()
         with tqdm(total=1, desc="Homology computation", ncols=80) as pbar:
-            betti = compute_persistent_homology(
-                dist_matrix,
-                max_dimension=TEST_CONFIG['homology']['max_dimension'],
-                max_edge_length=TEST_CONFIG['homology']['max_edge_length']
-            )
+        betti = compute_persistent_homology(
+            dist_matrix,
+            max_dimension=TEST_CONFIG['homology']['max_dimension'],
+            max_edge_length=TEST_CONFIG['homology']['max_edge_length']
+        )
             pbar.update(1)
         timing_3 = print_timing(start_time, "Homology computation")
         print(timing_3)
@@ -314,37 +314,37 @@ def test_main_config_integration():
         # Load config
         print("\nLoading configuration...")
         with tqdm(total=1, desc="Loading config", ncols=80) as pbar:
-            with open(config_file_path, 'r') as f:
-                main_training_config = yaml.safe_load(f)
+        with open(config_file_path, 'r') as f:
+            main_training_config = yaml.safe_load(f)
             pbar.update(1)
         
         # Verify config structure
         print("\nVerifying config structure...")
         with tqdm(total=5, desc="Config validation", ncols=80) as pbar:
-            assert 'data' in main_training_config, "Config Error: 'data' key missing"
+        assert 'data' in main_training_config, "Config Error: 'data' key missing"
             pbar.update(1)
-            assert 'generation' in main_training_config['data'], "Config Error: 'data.generation' key missing"
+        assert 'generation' in main_training_config['data'], "Config Error: 'data.generation' key missing"
             pbar.update(1)
-            data_gen_params_from_config = main_training_config['data']['generation']
-            assert 'n' in data_gen_params_from_config, "Config Error: 'data.generation.n' missing"
+        data_gen_params_from_config = main_training_config['data']['generation']
+        assert 'n' in data_gen_params_from_config, "Config Error: 'data.generation.n' missing"
             pbar.update(1)
-            assert 'big_radius' in data_gen_params_from_config, "Config Error: 'data.generation.big_radius' missing"
+        assert 'big_radius' in data_gen_params_from_config, "Config Error: 'data.generation.big_radius' missing"
             pbar.update(1)
-            assert 'small_radius' in data_gen_params_from_config, "Config Error: 'data.generation.small_radius' missing"
+        assert 'small_radius' in data_gen_params_from_config, "Config Error: 'data.generation.small_radius' missing"
             pbar.update(1)
 
         # Generate data
         print("\nGenerating test data...")
-        test_n_value = TEST_CONFIG['data']['n']
+        test_n_value = TEST_CONFIG['data']['n'] 
         current_data_gen_params = {
             'n': test_n_value,
             'big_radius': data_gen_params_from_config['big_radius'],
             'small_radius': data_gen_params_from_config['small_radius']
         }
-        
+
         start_time = time.time()
         with tqdm(total=100, desc="Data generation", ncols=80) as pbar:
-            X, y = generate(**current_data_gen_params)
+        X, y = generate(**current_data_gen_params)
             pbar.update(100)
         timing_1 = print_timing(start_time, "Data generation")
         print(timing_1)
@@ -356,11 +356,11 @@ def test_main_config_integration():
             pbar.update(1)
             assert y.shape[0] == 2 * test_n_value
             pbar.update(1)
-        
+
         # Train model
         print("\nTraining model with config parameters...")
         train_call_params = {
-            'width': TEST_CONFIG['model']['width'],
+            'width': TEST_CONFIG['model']['width'], 
             'layers': TEST_CONFIG['model']['layers'],
             'epochs': TEST_CONFIG['model']['epochs'],
             'batch_size': TEST_CONFIG['model']['batch_size'],
@@ -371,7 +371,7 @@ def test_main_config_integration():
         
         start_time = time.time()
         with tqdm(total=train_call_params['epochs'], desc="Model training", ncols=80) as pbar:
-            layer_outputs = train(X, y, **train_call_params)
+        layer_outputs = train(X, y, **train_call_params)
             pbar.update(train_call_params['epochs'])
         timing_2 = print_timing(start_time, "Model training")
         print(timing_2)
