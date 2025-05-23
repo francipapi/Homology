@@ -32,7 +32,7 @@ def plot_curves_from_h5(files, output_path=None, stat=True):
         except:
             try:
                 # If that fails, try as h5py file
-                with h5py.File(file, 'r') as h5_file:
+        with h5py.File(file, 'r') as h5_file:
                     data = np.array(h5_file['dataset']).astype(float)
             except Exception as e:
                 print(f"Error loading file {file}: {str(e)}")
@@ -108,7 +108,7 @@ def plot_curves_from_h5(files, output_path=None, stat=True):
             )
             stats_text += "{:<10} {:<10} {:<10.2f} {:<10.2f} {:.2f} - {:.2f}\n".format(
                 f"File {i+1}", "β₀+β₁", mean_sum, std_sum, min_sum, max_sum
-            )
+                )
         
         # Add the statistics text box to the plot
         props = dict(boxstyle='round', facecolor='white', alpha=0.8)
@@ -123,4 +123,4 @@ def plot_curves_from_h5(files, output_path=None, stat=True):
         plt.savefig(output_path)
         plt.close()
     else:
-        plt.show()
+    plt.show()

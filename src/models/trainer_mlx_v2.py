@@ -9,7 +9,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from src.data import dataset
-import mnist
 
 class MLP(nn.Module):
     """A simple MLP."""
@@ -87,13 +86,19 @@ def train(param):
     test_images = mx.array(test_images)
     test_labels = mx.array(test_labels.astype(np.int32))
 
+    # After train_labels = mx.array(train_labels.astype(np.int32))
+    if len(train_labels.shape) > 1:
+        train_labels = train_labels.reshape(-1)
+    # After test_labels = mx.array(test_labels.astype(np.int32))
+    if len(test_labels.shape) > 1:
+        test_labels = test_labels.reshape(-1)
+
     # Load the model
     model = MLP(num_layers, train_images.shape[-1], hidden_dim, num_classes)
     mx.eval(model.parameters())
 
     optimizer = optim.Adam(learning_rate=learning_rate)
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
-
 
     @partial(mx.compile, inputs=model.state)
     def eval_fn(X, y):
@@ -104,21 +109,14 @@ def train(param):
         for X, y in batch_iterate(batch_size, train_images, train_labels):
             loss, dloss_dw = loss_and_grad_fn(model, X, y)
             optimizer.update(model, dloss_dw)
-            print(model.parameters())
             mx.eval(model.parameters(), optimizer.state)
         accuracy = eval_fn(test_images, test_labels)
         toc = time.perf_counter()
-        if e % 1 ==0 and verbose:
+        if e % 1 == 0 and verbose:
             print(
                 f"Epoch {e}: Test accuracy {accuracy.item():.3f},"
                 f" Time {toc - tic:.3f} (s)"
             )
-
-    # Example new sample (replace with your actual data)
-    new_sample = np.array([[0.5, -1.2, 3.3]])  # Shape: (1, 3)
-
-    # Convert to MLX array
-    new_sample_mlx = mx.array(new_sample)
 
     if eval_fn(test_images, test_labels) < 0.999:
         print("Target accuracy not reached")
