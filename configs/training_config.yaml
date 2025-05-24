@@ -1,29 +1,79 @@
-# Training Configuration
+# PyTorch Training Configuration
 model:
-  width: 32           # Number of neurons per hidden layer
-  layers: 8           # Number of dense hidden layers
-  activation: 'relu'  # Activation function for hidden layers
-  output_activation: 'sigmoid' # Activation function for output layer
+  input_dim: null # Should be set based on data (e.g., 2 for moons, 3 for torus)
+  # hidden_dims: [32, 64, 32] # Removed as per new requirements
+  num_hidden_layers: 3 # New field
+  hidden_dim: 32       # New field
+  output_dim: 1 # Example for binary classification/regression
+  activation_fn_name: 'relu'  # Hidden layer activation: 'relu', 'tanh', 'leaky_relu', etc.
+  output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
+  dropout_rate: 0.1 # Dropout rate (0 to 1), 0 for no dropout
+  use_batch_norm: True # True or False for BatchNorm
 
 training:
-  epochs: 10
-  batch_size: 32
-  learning_rate: 0.001
-  decay_coeff: 0.1    # Learning rate decay coefficient
-  early_stopping_patience: 75 # Number of epochs with no improvement after which training will be stopped
-  device: 'cpu'      # Training device: 'auto', 'cpu', 'cuda', 'mps'
-  seed: 42            # Random seed for PyTorch and NumPy for reproducible training runs
-  parallel:
-    total_models: 1  # Total number of models to train
-    max_parallel_ratio: 0.75  # Maximum ratio of CPU cores to use (0.0 to 1.0)
-    min_parallel_models: 1    # Minimum number of models to train in parallel
-    max_parallel_models: 8    # Maximum number of models to train in parallel
-    save_threshold: 0.6  # Accuracy threshold for saving models
+  # General training settings
+  device: 'cpu'       # Training device: 'cpu', 'cuda', 'mps'
+  epochs: 50          # Number of training epochs
+  batch_size: 32      # Batch size for training and evaluation
+  learning_rate: 0.001  # Initial learning rate
+  seed: 42            # Random seed for reproducibility
+
+  # Optimizer settings (example: AdamW)
+  optimizer:
+    type: 'adamw'     # 'adam', 'adamw', 'sgd'
+    weight_decay: 0.01 # Weight decay for AdamW
+
+  # Loss function
+  loss_function: 'bce' # 'bce' (BinaryCrossEntropy), 'mse' (MeanSquaredError), 'cross_entropy' (CrossEntropyLoss for multi-class)
+
+  # Learning rate scheduler (optional)
+  scheduler:
+    type: 'reduce_on_plateau' # 'reduce_on_plateau', 'step_lr', 'none'
+    factor: 0.1          # Factor by which the learning rate will be reduced
+    patience: 10         # Number of epochs with no improvement after which learning rate will be reduced
+    # For StepLR
+    # step_size: 30
+    # gamma: 0.1
+
+  # Gradient clipping (optional)
+  gradient_clipping:
+    use: False           # True or False
+    max_norm: 1.0        # Max norm for gradient clipping
+
+  # Early stopping (optional)
+  early_stopping:
+    use: False           # True or False
+    patience: 20         # Number of epochs to wait for improvement before stopping
+    min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
+
+  # Settings for vectorized and parallel training
+  num_networks: 1 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  save_model_threshold: 0.8 # Optional: Minimum accuracy/metric to save a trained model
 
 data:
-  test_size: 0.2      # Proportion of the dataset to include in the test split
-  random_seed: 52     # Random seed for data splitting (e.g., train_test_split)
+  # General data loading and preprocessing settings
+  type: 'synthetic'    # 'synthetic', 'csv', 'custom_function'
+  path: null           # Path to data file if type is 'csv'
+  synthetic_type: 'moons' # 'moons', 'torus', 'classification', 'regression' (sklearn.datasets)
+                                # Note: if 'torus' is selected, it might imply using data.generation parameters
+  noise: 0.1           # Noise level for synthetic datasets (e.g., make_moons, make_classification)
+  # For make_classification
+  # n_features: 2
+  # n_classes: 2
+  # For make_regression
+  # n_features_regression: 1
+  # n_targets_regression: 1
+
+  # Original data generation subsection to be preserved
   generation:
-    n: 200           # Number of data points to generate
+    n: 200           # Number of data points to generate (specific to this generation block)
     big_radius: 3     # Radius of the larger circle of the torus
     small_radius: 1   # Radius of the smaller circle (tube) of the torus
+
+  # Train/test split options
+  split_ratio: 0.8     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
+                               # This replaces the old 'test_size' (0.2 test_size is 0.8 split_ratio)
+  shuffle_data: True   # Whether to shuffle data before splitting
+  random_seed_data: 42 # Random seed for data generation and splitting
+                               # This replaces the old 'random_seed' for splitting consistency.
+```
