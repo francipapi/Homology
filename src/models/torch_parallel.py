@@ -10,12 +10,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 import sys
 import time
+import trimesh as tr
 
 # Add project root to sys.path to allow relative imports
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.models.torch_mlp import MLP, generate_moons_data # Assuming it's in torch_mlp.py
+from src.models.torch_mlp import MLP, generate_torus_data
 
 # --- Worker Function for Parallel Training ---
 def train_single_model_process(model_id, config_dict, X_train_tensor, y_train_tensor, X_test_tensor, y_test_tensor, device_for_process_str):
@@ -143,57 +144,44 @@ class ParallelTrainer:
         # Data loading and preparation (once in main process)
         data_config = self.config['data']
         
-        # Set input_dim in config if null, based on data (as in torch_vectorised.py)
+        # Set input_dim in config if null, based on data
         if self.config['model'].get('input_dim') is None:
-            if data_config.get('synthetic_type') == 'moons':
-                self.config['model']['input_dim'] = 2
-                print(f"INFO: model.input_dim was null, set to 2 for moons data for ParallelTrainer.")
-            elif data_config.get('synthetic_type') == 'torus': # Assuming torus might be used
-                 self.config['model']['input_dim'] = 3
-                 print(f"INFO: model.input_dim was null, set to 3 for torus data for ParallelTrainer.")
-            # Add other data types if necessary
+            self.config['model']['input_dim'] = 3
+            print(f"INFO: model.input_dim was null, set to 3 for torus data for ParallelTrainer.")
 
-        if data_config['type'] == 'synthetic' and data_config.get('synthetic_type') == 'moons':
+        if data_config['type'] == 'synthetic':
             # Use data_config['generation']['n'] for synthetic data sample size
-            num_samples = data_config.get('generation', {}).get('n', 1000) # Default if generation or n not found
-            noise = data_config.get('noise', 0.1)
-            X, y = generate_moons_data(num_samples, noise)
-        # Add other data generation/loading logic here (e.g., for torus, csv)
-        # elif data_config['type'] == 'synthetic' and data_config.get('synthetic_type') == 'torus':
-        #     num_samples = data_config.get('generation', {}).get('n', 1000)
-        #     # Potentially other params for torus from data_config.generation
-        #     big_radius = data_config.get('generation', {}).get('big_radius', 3)
-        #     small_radius = data_config.get('generation', {}).get('small_radius', 1)
-        #     X, y = generate_torus_data(num_samples, big_radius, small_radius) # Assuming generate_torus_data exists
-        #     X, y = generate_torus_data(...) # Make sure this function is available
+            num_samples = data_config.get('generation', {}).get('n', 1000)
+            big_radius = data_config.get('generation', {}).get('big_radius', 3)
+            small_radius = data_config.get('generation', {}).get('small_radius', 1)
+            X, y = generate_torus_data(num_samples, big_radius, small_radius)
+
+            # Split data
+            split_ratio = data_config.get('split_ratio', 0.8)
+            shuffle = data_config.get('shuffle_data', True)
+            random_seed = data_config.get('random_seed_data', None)
+            
+            if shuffle:
+                if random_seed is not None:
+                    np.random.seed(random_seed)
+                indices = np.arange(X.shape[0])
+                np.random.shuffle(indices)
+                X = X[indices]
+                y = y[indices]
+
+            train_size = int(split_ratio * len(X))
+            self.X_train, self.X_test = X[:train_size], X[train_size:]
+            self.y_train, self.y_test = y[:train_size], y[train_size:]
+            
+            # Convert to tensors to pass to processes
+            self.X_train_tensor = torch.tensor(self.X_train, dtype=torch.float32)
+            self.y_train_tensor = torch.tensor(self.y_train, dtype=torch.float32)
+            self.X_test_tensor = torch.tensor(self.X_test, dtype=torch.float32)
+            self.y_test_tensor = torch.tensor(self.y_test, dtype=torch.float32)
+
+            self.collected_results = []
         else:
-            raise NotImplementedError(f"Data type {data_config['type']} or synthetic_type {data_config.get('synthetic_type')} not supported yet for parallel training.")
-
-        # Split data
-        split_ratio = data_config.get('split_ratio', 0.8)
-        shuffle = data_config.get('shuffle_data', True)
-        random_seed = data_config.get('random_seed_data', None) # Use if shuffling
-        
-        if shuffle:
-            if random_seed is not None:
-                np.random.seed(random_seed) # For shuffling indices
-            indices = np.arange(X.shape[0])
-            np.random.shuffle(indices)
-            X = X[indices]
-            y = y[indices]
-
-        train_size = int(split_ratio * len(X))
-        self.X_train, self.X_test = X[:train_size], X[train_size:]
-        self.y_train, self.y_test = y[:train_size], y[train_size:]
-        
-        # Convert to tensors to pass to processes
-        self.X_train_tensor = torch.tensor(self.X_train, dtype=torch.float32)
-        self.y_train_tensor = torch.tensor(self.y_train, dtype=torch.float32)
-        self.X_test_tensor = torch.tensor(self.X_test, dtype=torch.float32)
-        self.y_test_tensor = torch.tensor(self.y_test, dtype=torch.float32)
-
-        self.collected_results = []
-
+            raise NotImplementedError(f"Data type {data_config['type']} not supported yet for parallel training.")
 
     def train_models_parallel(self):
         # For CPU-bound tasks in parallel, ProcessPoolExecutor is suitable.
