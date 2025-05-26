@@ -40,8 +40,8 @@ try:
             sys.path.append(str(project_root))
         print(f"Falling back to project root (original logic): {project_root}")
 
-    from src.models.torch_mlp import MLP, generate_torus_data
-    print("Successfully imported MLP and generate_torus_data.")
+    from src.models.torch_mlp import MLP, generate_torus_data, load_data_from_file
+    print("Successfully imported MLP, generate_torus_data, and load_data_from_file.")
 except ImportError as e:
     print(f"Error importing project modules: {e}")
     print(f"Searched for 'src' directory upwards from {current_file_path if '__file__' in locals() else 'current script directory'}.")
@@ -53,7 +53,7 @@ except ImportError as e:
          )
 except NameError: 
     print("Warning: __file__ not defined. Relative imports might fail. Ensure 'src' is in PYTHONPATH.")
-    from src.models.torch_mlp import MLP, generate_torus_data
+    from src.models.torch_mlp import MLP, generate_torus_data, load_data_from_file
 
 
 # --- Helper for Functional Forward Pass ---
@@ -190,19 +190,26 @@ class VectorizedTrainer:
         print(f"\nTraining {self.num_networks} networks on {self.device}")
         print(f"Batch size: {training_config['batch_size']}, Epochs: {training_config['epochs']}")
 
-        if data_config['type'] == 'synthetic' and data_config.get('synthetic_type') == 'torus':
+        # Data generation or loading
+        data_source = data_config.get('data_source')
+        if data_source is not None:
+            print(f"Loading data from: {data_source}")
+            X_cpu, y_cpu = load_data_from_file(data_source)
+        elif data_config['type'] == 'synthetic' and data_config.get('synthetic_type') == 'torus':
             num_samples = data_config.get('generation', {}).get('n', 1000)
             big_radius = data_config.get('generation', {}).get('big_radius', 3)
             small_radius = data_config.get('generation', {}).get('small_radius', 1)
             X_cpu, y_cpu = generate_torus_data(num_samples, big_radius, small_radius)
+        else:
+            raise ValueError(f"Unsupported data configuration. Either set data_source or use synthetic data.")
             
-            split_ratio = data_config.get('split_ratio', 0.8)
-            train_size = int(split_ratio * len(X_cpu))
-            X_train_cpu, X_test_cpu = X_cpu[:train_size], X_cpu[train_size:]
-            y_train_cpu, y_test_cpu = y_cpu[:train_size], y_cpu[train_size:]
+        split_ratio = data_config.get('split_ratio', 0.8)
+        train_size = int(split_ratio * len(X_cpu))
+        X_train_cpu, X_test_cpu = X_cpu[:train_size], X_cpu[train_size:]
+        y_train_cpu, y_test_cpu = y_cpu[:train_size], y_cpu[train_size:]
 
-            train_dataset = torch.utils.data.TensorDataset(X_train_cpu, y_train_cpu)
-            self.train_loader = torch.utils.data.DataLoader(
+        train_dataset = torch.utils.data.TensorDataset(X_train_cpu, y_train_cpu)
+        self.train_loader = torch.utils.data.DataLoader(
                 train_dataset, 
                 batch_size=training_config['batch_size'],
                 shuffle=True,
@@ -211,20 +218,15 @@ class VectorizedTrainer:
                 persistent_workers=(training_config.get('num_workers', 2) > 0 and self.device.type != 'cpu')
             )
             
-            test_dataset = torch.utils.data.TensorDataset(X_test_cpu, y_test_cpu)
-            self.test_loader = torch.utils.data.DataLoader(
-                test_dataset,
-                batch_size=training_config['batch_size'],
-                shuffle=False,
-                pin_memory=(self.device.type != 'cpu'),
-                num_workers=training_config.get('num_workers', 2 if self.device.type != 'cpu' else 0),
-                persistent_workers=(training_config.get('num_workers', 2) > 0 and self.device.type != 'cpu')
-            )
-        else:
-            raise NotImplementedError(
-                f"Data type {data_config['type']} or "
-                f"synthetic_type {data_config.get('synthetic_type')} not supported yet."
-            )
+        test_dataset = torch.utils.data.TensorDataset(X_test_cpu, y_test_cpu)
+        self.test_loader = torch.utils.data.DataLoader(
+            test_dataset,
+            batch_size=training_config['batch_size'],
+            shuffle=False,
+            pin_memory=(self.device.type != 'cpu'),
+            num_workers=training_config.get('num_workers', 2 if self.device.type != 'cpu' else 0),
+            persistent_workers=(training_config.get('num_workers', 2) > 0 and self.device.type != 'cpu')
+        )
 
         for epoch in range(training_config['epochs']):
             epoch_loss_sum_device = torch.tensor(0.0, device=self.device)
@@ -320,6 +322,35 @@ class VectorizedTrainer:
             avg_accuracy = (epoch_correct_device / epoch_total_elements_device) if epoch_total_elements_device > 0 else torch.tensor(0.0, device=self.device)
             
             print(f"Epoch {epoch+1}/{training_config['epochs']} - Loss: {avg_epoch_loss.item():.4f} - Accuracy: {avg_accuracy.item():.4f}")
+        
+        # Extract layer outputs if enabled
+        layer_extraction_config = self.config.get('layer_extraction', {})
+        if layer_extraction_config.get('enabled', False):
+            print("\nExtracting layer outputs...")
+            # Combine train and test datasets into one
+            full_dataset = ConcatDataset([self.train_loader.dataset, self.test_loader.dataset])
+            full_loader = DataLoader(
+                full_dataset,
+                batch_size=training_config['batch_size'],
+                shuffle=False,
+                pin_memory=(self.device.type != 'cpu'),
+                num_workers=training_config.get('num_workers', 2 if self.device.type != 'cpu' else 0),
+                persistent_workers=(training_config.get('num_workers', 2) > 0 and self.device.type != 'cpu')
+            )
+            all_models_activations = self.extract_layer_outputs_vectorized(full_loader)
+            print(f"torch_vectorized.py: Shape of extracted layer outputs tensor: {all_models_activations.shape}")
+            
+            # Save layer outputs
+            output_dir = Path(layer_extraction_config.get('output_dir', 'results/layer_outputs'))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / 'torch_vectorized_layer_outputs.pt'
+            torch.save({
+                'layer_outputs': all_models_activations.cpu(),
+                'config': self.config
+            }, output_file)
+            print(f"Layer outputs saved to: {output_file}")
+        else:
+            print("Layer extraction disabled. Skipping layer output extraction.")
 
     def extract_layer_outputs_vectorized(self, data_loader):
         current_params_infer = [p.detach() for p in self.stacked_params]
@@ -407,19 +438,4 @@ if __name__ == "__main__":
     trainer = VectorizedTrainer(args.config_path)
     trainer.train()
 
-    '''
-    print("\nExtracting layer outputs using test_loader...")
-    if hasattr(trainer, 'test_loader') and trainer.test_loader is not None and \
-       hasattr(trainer.test_loader, 'dataset') and len(trainer.test_loader.dataset)>0:
-        full_dataset = ConcatDataset([trainer.train_loader.dataset, trainer.test_loader.dataset])
-        full_loader = DataLoader(
-        full_dataset,
-        batch_size=trainer.config['training']['batch_size'],
-        shuffle=False,
-        pin_memory=False
-    )
-        all_models_activations_device = trainer.extract_layer_outputs_vectorized(full_loader)
-        print(f"Layer outputs shape on device '{all_models_activations_device.device}': {all_models_activations_device.shape}")
-    else:
-        print("Test loader not available, is empty, or not fully initialized. Skipping activation extraction.")
-    '''
+

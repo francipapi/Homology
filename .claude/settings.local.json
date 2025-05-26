@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=/Users/francescopapini/GitRepo/Homology python src/models/torch_mlp.py test_config.yaml)",
+      "Bash(PYTHONPATH=/Users/francescopapini/GitRepo/Homology python src/models/torch_vectorized.py test_config.yaml)"
+    ],
+    "deny": []
+  }
+}

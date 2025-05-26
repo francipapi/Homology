@@ -5,6 +5,8 @@ import numpy as np
 import yaml
 import argparse
 import trimesh as tr
+import os
+from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from torch.cuda.amp import autocast, GradScaler  # For mixed precision training
 
@@ -114,6 +116,41 @@ class MLP(nn.Module):
         output_tensor = stacked_activations.unsqueeze(0)
         return output_tensor
 
+
+# --- Data Loading Functions ---
+def load_data_from_file(file_path):
+    """
+    Load dataset from a file. Supports .npy, .npz, .pt, and .pth formats.
+    Expected format: X (features) and y (labels) arrays.
+    """
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Data file not found: {file_path}")
+    
+    if file_path.suffix == '.npy':
+        # Assume the file contains both X and y in a single array or dict
+        data = np.load(file_path, allow_pickle=True)
+        if isinstance(data, dict) or hasattr(data, 'item'):
+            data = data.item() if hasattr(data, 'item') else data
+            X = torch.tensor(data['X'], dtype=torch.float32)
+            y = torch.tensor(data['y'], dtype=torch.float32)
+        else:
+            raise ValueError("For .npy files, expected dict with 'X' and 'y' keys")
+    elif file_path.suffix == '.npz':
+        data = np.load(file_path)
+        X = torch.tensor(data['X'], dtype=torch.float32)
+        y = torch.tensor(data['y'], dtype=torch.float32)
+    elif file_path.suffix in ['.pt', '.pth']:
+        data = torch.load(file_path)
+        if isinstance(data, dict):
+            X = data['X']
+            y = data['y']
+        else:
+            raise ValueError("For .pt/.pth files, expected dict with 'X' and 'y' keys")
+    else:
+        raise ValueError(f"Unsupported file format: {file_path.suffix}")
+    
+    return X, y
 
 # --- Data Generation ---
 def generate_torus_data(n_samples, big_radius, small_radius):
@@ -236,33 +273,42 @@ def train_model(config_path):
     # Mixed precision training
     scaler = GradScaler() if device.type == 'cuda' else None
 
-    # Data generation
-    if data_config['type'] == 'synthetic':
+    # Data generation or loading
+    data_source = data_config.get('data_source')
+    if data_source is not None:
+        print(f"Loading data from: {data_source}")
+        X, y = load_data_from_file(data_source)
+    elif data_config['type'] == 'synthetic':
         num_samples = data_config.get('generation', {}).get('n', 1000)
         big_radius = data_config.get('generation', {}).get('big_radius', 3)
         small_radius = data_config.get('generation', {}).get('small_radius', 1)
         X, y = generate_torus_data(num_samples, big_radius, small_radius)
-        
-        # Move data to device
-        X = X.to(device)
-        y = y.to(device)
-        
-        # Split data
-        split_ratio = data_config.get('split_ratio', 0.8)
-        train_size = int(split_ratio * len(X))
-        X_train, X_test = X[:train_size], X[train_size:]
-        y_train, y_test = y[:train_size], y[train_size:]
-
-        # Create datasets and dataloaders
-        train_dataset = TensorDataset(X_train, y_train)
-        test_dataset = TensorDataset(X_test, y_test)
-
-        train_loader = DataLoader(train_dataset, batch_size=training_config['batch_size'], 
-                                shuffle=True, pin_memory=True if device.type == 'cuda' else False)
-        test_loader = DataLoader(test_dataset, batch_size=training_config['batch_size'], 
-                               shuffle=False, pin_memory=True if device.type == 'cuda' else False)
     else:
-        raise ValueError(f"Unsupported data type: {data_config['type']}")
+        raise ValueError(f"Unsupported data configuration. Either set data_source or use synthetic data.")
+        
+    # Move data to device
+    X = X.to(device)
+    y = y.to(device)
+
+    # Shiffle data 
+    perm = torch.randperm(len(X), device=device)   # random index order
+    X = X[perm]
+    y = y[perm]
+    
+    # Split data
+    split_ratio = data_config.get('split_ratio', 0.8)
+    train_size = int(split_ratio * len(X))
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    # Create datasets and dataloaders
+    train_dataset = TensorDataset(X_train, y_train)
+    test_dataset = TensorDataset(X_test, y_test)
+
+    train_loader = DataLoader(train_dataset, batch_size=training_config['batch_size'], 
+                            shuffle=True, pin_memory=True if device.type == 'cuda' else False)
+    test_loader = DataLoader(test_dataset, batch_size=training_config['batch_size'], 
+                           shuffle=False, pin_memory=True if device.type == 'cuda' else False)
 
     # Scheduler
     scheduler = None
@@ -334,19 +380,33 @@ def train_model(config_path):
     
     print("Training finished.")
 
-    # Extract layer outputs from the *full* dataset
-    print("\nExtracting layer outputs...")
-    model.to(device)
-    # Combine train and test datasets into one
-    full_dataset = ConcatDataset([train_dataset, test_dataset])
-    full_loader = DataLoader(
-        full_dataset,
-        batch_size=training_config['batch_size'],
-        shuffle=False,
-        pin_memory=True if device.type == 'cuda' else False
-    )
-    layer_outputs_tensor = model.extract_layer_outputs(full_loader, device)
-    print(f"torch_mlp.py: Shape of extracted layer outputs tensor: {layer_outputs_tensor.shape}")
+    # Extract layer outputs if enabled
+    layer_extraction_config = config.get('layer_extraction', {})
+    if layer_extraction_config.get('enabled', False):
+        print("\nExtracting layer outputs...")
+        model.to(device)
+        # Combine train and test datasets into one
+        full_dataset = ConcatDataset([train_dataset, test_dataset])
+        full_loader = DataLoader(
+            full_dataset,
+            batch_size=training_config['batch_size'],
+            shuffle=False,
+            pin_memory=True if device.type == 'cuda' else False
+        )
+        layer_outputs_tensor = model.extract_layer_outputs(full_loader, device)
+        print(f"torch_mlp.py: Shape of extracted layer outputs tensor: {layer_outputs_tensor.shape}")
+        
+        # Save layer outputs
+        output_dir = Path(layer_extraction_config.get('output_dir', 'results/layer_outputs'))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / 'torch_mlp_layer_outputs.pt'
+        torch.save({
+            'layer_outputs': layer_outputs_tensor.cpu(),
+            'config': config
+        }, output_file)
+        print(f"Layer outputs saved to: {output_file}")
+    else:
+        print("Layer extraction disabled. Skipping layer output extraction.")
 
 # --- Main Execution Block ---
 if __name__ == "__main__":

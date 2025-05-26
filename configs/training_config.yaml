@@ -8,14 +8,14 @@ model:
   activation_fn_name: 'relu'
   output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
   dropout_rate: 0.15  # Slightly reduced dropout
-  use_batch_norm: false
+  use_batch_norm: true
 
 training:
   # General training settings
-  device: 'mps'       # Using MPS for MacBook GPU
+  device: 'cpu'       # cpu, cuda or mps
   epochs: 10  # Temporarily reduced for testin
-  batch_size: 256    # Increased batch size for MPS
-  learning_rate: 0.0005  # Reduced learning rate
+  batch_size: 32    # Increased batch size for MPS
+  learning_rate: 0.001  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
 
   # Optimizer settings (example: AdamW)
@@ -46,7 +46,7 @@ training:
     min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
 
   # Settings for vectorized and parallel training
-  num_networks: 1000 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
   max_parallel_workers: null  # Will default to os.cpu_count()
   save_model_threshold: 0.8 # Optional: Minimum accuracy/metric to save a trained model
 
@@ -54,8 +54,9 @@ data:
   # General data loading and preprocessing settings
   type: 'synthetic'    # 'synthetic', 'csv', 'custom_function'
   path: null           # Path to data file if type is 'csv'
+  data_source: null    # Path to dataset file to load instead of generating synthetic data. If null, use generation function
   synthetic_type: 'torus' # 'moons' or 'torus'
-  noise: 0.05           # Reduced noise
+  noise: 0           # Reduced noise
   # For make_classification
   # n_features: 2
   # n_classes: 2
@@ -70,9 +71,14 @@ data:
     small_radius: 1   # Radius of the smaller circle (tube) of the torus
 
   # Train/test split options
-  split_ratio: 0.8     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
+  split_ratio: 0.90     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
                                # This replaces the old 'test_size' (0.2 test_size is 0.8 split_ratio)
   shuffle_data: true   # Whether to shuffle data before splitting
   random_seed_data: 42 # Random seed for data generation and splitting
                                # This replaces the old 'random_seed' for splitting consistency.
+
+# Layer extraction settings
+layer_extraction:
+  enabled: false       # If true, extract and save layer outputs
+  output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
 
