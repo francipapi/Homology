@@ -46,7 +46,7 @@ training:
     min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
 
   # Settings for vectorized and parallel training
-  num_networks: 10 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
   max_parallel_workers: null  # Will default to os.cpu_count()
   save_model_threshold: 0.8 # Optional: Minimum accuracy/metric to save a trained model
 
