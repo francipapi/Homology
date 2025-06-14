@@ -3,8 +3,14 @@
     "allow": [
       "Bash(python:*)",
       "Bash(PYTHONPATH=/Users/francescopapini/GitRepo/Homology python src/models/torch_mlp.py test_config.yaml)",
-      "Bash(PYTHONPATH=/Users/francescopapini/GitRepo/Homology python src/models/torch_vectorized.py test_config.yaml)"
+      "Bash(PYTHONPATH=/Users/francescopapini/GitRepo/Homology python src/models/torch_vectorized.py test_config.yaml)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(timeout:*)",
+      "Bash(source:*)",
+      "Bash(conda activate:*)"
     ],
     "deny": []
-  }
+  },
+  "enableAllProjectMcpServers": false
 }

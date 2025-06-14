@@ -1,0 +1,13 @@
+Homology Computation Log
+========================
+Start time: Sat Jun 14 17:18:38 2025
+Total computation time: 25.89 seconds
+Configuration file: configs/homology_config.yaml
+Input directory: results/layer_outputs
+Output directory: results/homology
+Max dimension: 2
+Files processed: ['torch_mlp_layer_outputs.pt']
+
+torch_mlp_layer_outputs.pt:
+  Shape: (1, 8, 3)
+  Betti number ranges: ['[1, 8]', '[0, 1]', '[0, 7]']

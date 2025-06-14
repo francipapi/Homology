@@ -13,14 +13,14 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 5  # Temporarily reduced for testin
-  batch_size: 32    # Increased batch size for MPS
+  epochs: 300 # Temporarily reduced for testin
+  batch_size: 256    # Increased batch size for MPS
   learning_rate: 0.001  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
 
   # Optimizer settings (example: AdamW)
   optimizer:
-    name: 'adamw'  # Using AdamW for better regularization
+    name: 'adam'  # Using AdamW for better regularization
     weight_decay: 0.005  # Reduced weight decay
 
   # Loss function
@@ -29,7 +29,7 @@ training:
   # Learning rate scheduler (optional)
   lr_scheduler:
     type: 'reduce_on_plateau' # 'reduce_on_plateau', 'step_lr', 'none'
-    factor: 0.2          # More aggressive reduction
+    factor: 0.01         # More aggressive reduction
     patience: 15         # Increased patience
     min_lr: 0.00001
     verbose: true        # Whether to print learning rate changes
@@ -79,6 +79,6 @@ data:
 
 # Layer extraction settings
 layer_extraction:
-  enabled: false       # If true, extract and save layer outputs
+  enabled: true     # If true, extract and save layer outputs
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
 
