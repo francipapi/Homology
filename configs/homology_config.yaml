@@ -1,21 +1,46 @@
 # Homology Configuration
+
+# Input/Output Configuration
+io:
+  input_dir: "results/layer_outputs"     # Directory containing layer output files
+  output_dir: "results/homology"        # Directory for homology results
+  input_pattern: "*.pt"                 # File pattern to match
+  save_intermediate: false              # Save FPS points and distance matrices
+  save_persistence_diagrams: false     # Save full persistence diagrams
+
+# Sampling Configuration
+sampling:
+  use_fps: true                          # Enable/disable Furthest Point Sampling
+  fps_num_points: 16000                    # Target number of points after FPS (reduced to avoid segfault)
+  min_points_threshold: 50             # Minimum points required to perform homology
+  adaptive_sampling: true              # Adjust sample size based on dataset size
+  max_sample_ratio: 0.002              # Maximum fraction of original data to sample (0.2% for demo)
+
+# Distance Matrix Configuration  
+distance:                     # "knn" (geodesic on k-NN graph) or "full" (Euclidean)
+  k_neighbors: 4                       # Number of nearest neighbors for k-NN graph construction
+  metric: "euclidean"                  # Base metric for k-NN graph edges ("euclidean", "cosine", "manhattan")
+  geodesic: true                       # Use geodesic distances on k-NN graph (always true for method="knn")            # "euclidean" (actual distances) or "uniform" (all edges = 1)          # Density threshold for graph connectivity warnings
+
+# Homology Computation
 computation:
-  max_dimension: 2      # Maximum homology dimension to compute (e.g., H0, H1, H2)
-  max_edge_length: 1.0  # Maximum edge length for the Vietoris-Rips complex construction
-  min_persistence: 0.0  # Minimum persistence value for a topological feature to be considered significant
-                        # Note: This parameter is available in Gudhi but not currently utilized by the 
-                        # `compute_persistent_homology` function in `src/topology/homology.py` via `main.py`.
-  num_neighbors: 10     # Number of neighbors to use in k-nearest neighbors graph construction
-                        # Note: This parameter is available in Gudhi but not currently utilized by the 
-                        # `compute_persistent_homology` function in `src/topology/homology.py` via `main.py`.
-
-# The 'parallel' and 'output' sections below are not currently used by the main.py workflow.
-# They might be relevant for other scripts or future enhancements.
-parallel:
-  enabled: true         # Placeholder for enabling parallel computation
-  num_workers: 4        # Placeholder for number of workers for parallel computation
-
+  max_dimension: 2                    # Maximum homology dimension (H0, H1, H2)
+  max_edge_length: 1.0                 # Maximum edge length for Vietoris-Rips complex (increased for integer distances)
+  min_persistence: 0.0                # Minimum persistence value for features
+  num_neighbors: 50                   # Number of neighbors (actively used for k-NN)
+  normalize_data: false               # Normalize layer activations before processing (disabled due to numpy compatibility)
+  collapse_edges: true                # Use edge collapse optimization in Gudhi
+# Output Configuration
 output:
-  save_diagrams: true   # Placeholder for flag to save persistence diagrams
-  save_betti: true      # Placeholder for flag to save Betti numbers
-  save_persistence: true # Placeholder for flag to save full persistence data
+  save_diagrams: true                # Save persistence diagrams
+  save_betti: true                   # Save Betti numbers (main output)
+  save_persistence: false            # Save full persistence data
+  output_format: "pytorch"           # "pytorch" (.pt) or "numpy" (.npz)
+  compress_output: true              # Compress output files
+
+# Logging and Monitoring
+logging:
+  level: "WARNING"                   # Logging level (reduced verbosity)
+  save_logs: true                    # Save logs to file
+  progress_bar: true                 # Show progress bars
+  profile_performance: false         # Enable performance profiling

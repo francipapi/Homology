@@ -1,0 +1,34 @@
+computation:
+  collapse_edges: true
+  max_dimension: 2
+  max_edge_length: 2.0
+  min_persistence: 0.0
+  normalize_data: false
+  num_neighbors: 50
+distance:
+  geodesic: true
+  k_neighbors: 20
+  metric: euclidean
+io:
+  input_dir: results/layer_outputs
+  input_pattern: '*.pt'
+  output_dir: results/homology
+  save_intermediate: false
+  save_persistence_diagrams: false
+logging:
+  level: WARNING
+  profile_performance: false
+  progress_bar: true
+  save_logs: true
+output:
+  compress_output: true
+  output_format: pytorch
+  save_betti: true
+  save_diagrams: true
+  save_persistence: false
+sampling:
+  adaptive_sampling: true
+  fps_num_points: 2000
+  max_sample_ratio: 0.002
+  min_points_threshold: 50
+  use_fps: true
