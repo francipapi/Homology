@@ -266,6 +266,11 @@ def train_model(config_path):
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=opt_config.get('weight_decay', 0.0))
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_type}")
+    
+    # Get regularization parameters
+    reg_config = training_config.get('regularization', {})
+    l1_lambda = reg_config.get('l1_lambda', 0.0)
+    l2_lambda = reg_config.get('l2_lambda', 0.0)
 
     # Loss function
     criterion = nn.BCELoss()
@@ -335,12 +340,34 @@ def train_model(config_path):
                 with autocast():
                     output = model(data)
                     loss = criterion(output, target)
+                    
+                    # Add L1/L2 regularization
+                    if l1_lambda > 0 or l2_lambda > 0:
+                        reg_loss = 0
+                        for param in model.parameters():
+                            if l1_lambda > 0:
+                                reg_loss += l1_lambda * torch.sum(torch.abs(param))
+                            if l2_lambda > 0:
+                                reg_loss += l2_lambda * torch.sum(param ** 2)
+                        loss = loss + reg_loss
+                        
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 output = model(data)
                 loss = criterion(output, target)
+                
+                # Add L1/L2 regularization
+                if l1_lambda > 0 or l2_lambda > 0:
+                    reg_loss = 0
+                    for param in model.parameters():
+                        if l1_lambda > 0:
+                            reg_loss += l1_lambda * torch.sum(torch.abs(param))
+                        if l2_lambda > 0:
+                            reg_loss += l2_lambda * torch.sum(param ** 2)
+                    loss = loss + reg_loss
+                    
                 loss.backward()
                 optimizer.step()
 

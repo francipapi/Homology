@@ -11,14 +11,14 @@ io:
 # Sampling Configuration
 sampling:
   use_fps: true                          # Enable/disable Furthest Point Sampling
-  fps_num_points: 1000                     # Target number of points after FPS
+  fps_num_points: 20000                     # Target number of points after FPS
   min_points_threshold: 50             # Minimum points required to perform homology
   adaptive_sampling: true              # Adjust sample size based on dataset size
   max_sample_ratio: 0.01               # Maximum fraction of original data to sample (1% for testing)
 
 # Distance Matrix Configuration  
 distance:                     # "knn" (geodesic on k-NN graph) or "full" (Euclidean)
-  k_neighbors: 12                      # Number of nearest neighbors for k-NN graph construction
+  k_neighbors: 12                     # Number of nearest neighbors for k-NN graph construction
   metric: "euclidean"                  # Base metric for k-NN graph edges ("euclidean", "cosine", "manhattan")
   geodesic: true                       # Use geodesic distances on k-NN graph (always true for method="knn")            # "euclidean" (actual distances) or "uniform" (all edges = 1)          # Density threshold for graph connectivity warnings
 
@@ -40,8 +40,8 @@ output:
 
 # Parallel Processing Configuration
 parallel:
-  enabled: false                     # Enable parallel processing
-  num_workers: null                  # Number of workers (null for auto-detection)
+  enabled: true                     # Enable parallel processing
+  num_workers: 8                  # Number of workers (null for auto-detection)
   chunk_size: 1                      # Tasks per worker batch
   timeout_per_task: 300              # Timeout per task in seconds (5 minutes)
   method: "concurrent_futures"       # Parallel processing method

@@ -1,7 +1,7 @@
 computation:
   collapse_edges: true
   max_dimension: 2
-  max_edge_length: 2.0
+  max_edge_length: 3.0
   min_persistence: 0.0
   normalize_data: false
   num_neighbors: 50
@@ -28,14 +28,14 @@ output:
   save_persistence: false
 parallel:
   chunk_size: 1
-  enabled: false
+  enabled: true
   memory_limit_gb: 50.0
   method: concurrent_futures
-  num_workers: null
+  num_workers: 8
   timeout_per_task: 300
 sampling:
   adaptive_sampling: true
-  fps_num_points: 1000
+  fps_num_points: 16000
   max_sample_ratio: 0.01
   min_points_threshold: 50
   use_fps: true

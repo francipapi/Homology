@@ -17,7 +17,9 @@
       "Bash(/opt/anaconda3/bin/conda run -n myenv python visualize_betti.py --format pdf)",
       "Bash(/opt/anaconda3/bin/conda run -n myenv python debug_homology.py)",
       "Bash(/opt/anaconda3/bin/conda run -n myenv python visualize_betti.py)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(true)"
     ],
     "deny": []
   },

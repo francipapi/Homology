@@ -7,21 +7,26 @@ model:
   output_dim: 1  # Binary classification
   activation_fn_name: 'relu'
   output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
-  dropout_rate: 0.15  # Slightly reduced dropout
-  use_batch_norm: true
+  dropout_rate: 0.0012  # Slightly reduced dropout
+  use_batch_norm: false
 
 training:
   # General training settings
-  device: 'cpu'       # cpu, cuda or mps
-  epochs: 200 # Temporarily reduced for testin
-  batch_size: 512    # Increased batch size for MPS
-  learning_rate: 0.001  # Reduced learning rate
+  device: 'mps'       # cpu, cuda or mps
+  epochs: 80 # Temporarily reduced for testin
+  batch_size: 64    # Increased batch size for MPS
+  learning_rate: 0.0015  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
 
   # Optimizer settings (example: AdamW)
   optimizer:
-    name: 'adam'  # Using AdamW for better regularization
-    weight_decay: 0.005  # Reduced weight decay
+    name: 'adamw'  # Using AdamW for better regularization
+    weight_decay: 0.000014  # Reduced weight decay
+  
+  # Regularization settings
+  regularization:
+    l1_lambda: 0.0000012  # L1 regularization strength (0.0 = disabled)
+    l2_lambda: 0.0004   # L2 regularization strength (0.0 = disabled)
 
   # Loss function
   loss_fn: 'bce' # 'bce' (BinaryCrossEntropy), 'mse' (MeanSquaredError), 'cross_entropy' (CrossEntropyLoss for multi-class)
@@ -37,7 +42,7 @@ training:
   # Gradient clipping (optional)
   gradient_clipping:
     enabled: true
-    max_norm: 0.5        # Reduced max norm
+    max_norm: 0.17        # Reduced max norm
 
   # Early stopping (optional)
   early_stopping:
@@ -46,7 +51,7 @@ training:
     min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
 
   # Settings for vectorized and parallel training
-  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  num_networks: 20 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
   max_parallel_workers: null  # Will default to os.cpu_count()
   save_model_threshold: 0.8 # Optional: Minimum accuracy/metric to save a trained model
 
@@ -71,7 +76,7 @@ data:
     small_radius: 1   # Radius of the smaller circle (tube) of the torus
 
   # Train/test split options
-  split_ratio: 0.90     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
+  split_ratio: 0.85     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
                                # This replaces the old 'test_size' (0.2 test_size is 0.8 split_ratio)
   shuffle_data: true   # Whether to shuffle data before splitting
   random_seed_data: 42 # Random seed for data generation and splitting
