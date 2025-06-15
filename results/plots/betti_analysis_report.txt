@@ -2,54 +2,54 @@ BETTI NUMBERS ANALYSIS REPORT
 ==================================================
 
 Dataset Information:
-  Number of networks: 1
+  Number of networks: 5
   Number of layers: 8
   Betti dimensions: 3 (B0, B1, B2)
 
 B₀ (Components):
-  Overall mean: 1.88
-  Overall std:  2.32
+  Overall mean: 4.22
+  Overall std:  3.17
   Min value:    1
-  Max value:    8
+  Max value:    14
 
 B₁ (Loops):
-  Overall mean: 4.62
-  Overall std:  4.30
-  Min value:    0
-  Max value:    12
+  Overall mean: 23.30
+  Overall std:  6.85
+  Min value:    5
+  Max value:    39
 
 B₂ (Voids):
-  Overall mean: 11.50
-  Overall std:  14.35
-  Min value:    0
-  Max value:    41
+  Overall mean: 119.12
+  Overall std:  41.63
+  Min value:    35
+  Max value:    238
 
 Layer-wise Analysis:
   Layer 1:
-    Mean total complexity: 11.00
-    Betti numbers: [8. 0. 3.]
+    Mean total complexity: 154.20
+    Betti numbers: [ 11.2  21.  122. ]
   Layer 2:
-    Mean total complexity: 47.00
-    Betti numbers: [ 1.  5. 41.]
+    Mean total complexity: 220.40
+    Betti numbers: [  6.6  25.  188.8]
   Layer 3:
-    Mean total complexity: 43.00
-    Betti numbers: [ 1. 12. 30.]
+    Mean total complexity: 167.80
+    Betti numbers: [  3.8  27.  137. ]
   Layer 4:
-    Mean total complexity: 19.00
-    Betti numbers: [ 1. 10.  8.]
+    Mean total complexity: 160.60
+    Betti numbers: [  2.6  22.2 135.8]
   Layer 5:
-    Mean total complexity: 12.00
-    Betti numbers: [1. 5. 6.]
+    Mean total complexity: 142.00
+    Betti numbers: [  2.6  22.6 116.8]
   Layer 6:
-    Mean total complexity: 10.00
-    Betti numbers: [1. 5. 4.]
+    Mean total complexity: 123.80
+    Betti numbers: [ 2.4 23.2 98.2]
   Layer 7:
-    Mean total complexity: 1.00
-    Betti numbers: [1. 0. 0.]
+    Mean total complexity: 109.00
+    Betti numbers: [ 2.6 22.  84.4]
   Layer 8:
-    Mean total complexity: 1.00
-    Betti numbers: [1. 0. 0.]
+    Mean total complexity: 95.40
+    Betti numbers: [ 2.  23.4 70. ]
 
 Configuration Used:
-  Sample points per layer: 1000
+  Sample points per layer: 16000
   Max homology dimension: 2

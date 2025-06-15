@@ -1,0 +1,123 @@
+# Hyperparameter Optimization Configuration for torch_mlp
+
+optimization:
+  # Number of trials to run
+  n_trials: 1000
+  
+  # Device configuration for optimization strategy
+  device: "mps"  # auto, cpu, cuda, mps
+  
+  # CPU-specific configuration (multiprocessing)
+  cpu:
+    n_jobs: 12  # Number of parallel worker processes
+  
+  # GPU-specific configuration (vectorized training)
+  gpu:
+    vectorized_batch_size: 100 # Number of networks trained simultaneously
+    use_mixed_precision: true  # Use automatic mixed precision for speed
+    max_memory_fraction: 0.99  # Maximum GPU memory to use
+  
+  # Study name for Optuna
+  study_name: "torch_mlp_bayesian_optimization"
+  
+  # Database storage for study persistence
+  storage: "sqlite:///optuna_torch_mlp.db"
+  
+  # Pruning configuration to stop unpromising trials early
+  pruner:
+    type: "median"  # MedianPruner: prune if trial is worse than median
+    n_startup_trials: 5  # Number of trials before pruning starts
+    n_warmup_steps: 10  # Number of steps before pruning starts in each trial
+  
+  # Sampler configuration
+  sampler:
+    type: "TPE"  # Tree-structured Parzen Estimator (default and recommended)
+
+# Hyperparameter search space
+search_space:
+  # Learning rate (log scale)
+  learning_rate:
+    type: "float"
+    low: 1e-5
+    high: 1e-1
+    log: true
+  
+  # Batch size (categorical)
+  batch_size:
+    type: "categorical"
+    choices: [16, 32, 64, 128, 256]
+  
+  # Dropout rate
+  dropout_rate:
+    type: "float"
+    low: 0.0
+    high: 0.5
+  
+  # L1 regularization (log scale)
+  l1_lambda:
+    type: "float"
+    low: 1e-6
+    high: 1e-1
+    log: true
+  
+  # L2 regularization (log scale)
+  l2_lambda:
+    type: "float"
+    low: 1e-6
+    high: 1e-1
+    log: true
+  
+  # Optimizer choice
+  optimizer:
+    type: "categorical"
+    choices: ["adam", "adamw", "sgd"]
+  
+  # Weight decay (log scale)
+  weight_decay:
+    type: "float"
+    low: 1e-6
+    high: 1e-2
+    log: true
+  
+  # SGD momentum (conditional on optimizer choice)
+  momentum:
+    type: "float"
+    low: 0.8
+    high: 0.99
+    condition: "optimizer == 'sgd'"
+  
+  # Gradient clipping
+  use_gradient_clipping:
+    type: "categorical"
+    choices: [true, false]
+  
+  # Gradient clipping max norm (conditional)
+  grad_clip_max_norm:
+    type: "float"
+    low: 0.1
+    high: 5.0
+    condition: "use_gradient_clipping == true"
+  
+  # Number of epochs
+  epochs:
+    type: "int"
+    low: 50
+    high: 200
+
+# Output configuration
+output:
+  # Where to save the optimized parameters
+  optimized_config_path: "configs/optimized_parameters.yaml"
+  
+  # Results directory for plots and logs
+  results_dir: "results/optimization"
+  
+  # Whether to generate plots after optimization
+  generate_plots: true
+  
+  # Plot settings
+  plots:
+    optimization_history: true
+    parameter_importance: true
+    parallel_coordinate: true
+    contour_plot: true
