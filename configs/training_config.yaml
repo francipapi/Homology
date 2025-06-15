@@ -13,8 +13,8 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 300 # Temporarily reduced for testin
-  batch_size: 256    # Increased batch size for MPS
+  epochs: 200 # Temporarily reduced for testin
+  batch_size: 512    # Increased batch size for MPS
   learning_rate: 0.001  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
 
@@ -81,4 +81,3 @@ data:
 layer_extraction:
   enabled: true     # If true, extract and save layer outputs
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
-

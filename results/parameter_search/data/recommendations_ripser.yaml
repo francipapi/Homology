@@ -1,0 +1,25 @@
+- justification: high stability across datasets; 100% computation success rate
+  k: 9
+  max_edge_length: 2
+  ripser_time: 4.081175088882446
+  score: 0.44509959984783026
+- justification: high stability across datasets; 100% computation success rate
+  k: 6
+  max_edge_length: 3
+  ripser_time: 5.011171221733093
+  score: 0.4420548060670564
+- justification: high stability across datasets; 100% computation success rate
+  k: 12
+  max_edge_length: 2
+  ripser_time: 5.073798179626465
+  score: 0.44149226852412576
+- justification: high stability across datasets; 100% computation success rate
+  k: 9
+  max_edge_length: 3
+  ripser_time: 8.09204649925232
+  score: 0.43422144305701055
+- justification: high stability across datasets; 100% computation success rate
+  k: 12
+  max_edge_length: 3
+  ripser_time: 13.203500628471375
+  score: 0.4302633370195481

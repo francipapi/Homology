@@ -211,18 +211,28 @@ def train_single_network(args):
         model_saved = True
 
     # Extract layer outputs
-    layer_outputs = None
+    layer_outputs_path = None
     le_cfg = config.get('layer_extraction', {})
     if le_cfg.get('enabled', False):
-        full_dataset = ConcatDataset([train_dataset, test_dataset])
-        full_loader  = DataLoader(full_dataset,
-                                   batch_size=training_config['batch_size'],
-                                   shuffle=False,
-                                   num_workers=0)
-        lo_tensor = model.extract_layer_outputs(full_loader, device)
-        layer_outputs = lo_tensor.cpu().numpy()
+        try:
+            full_dataset = ConcatDataset([train_dataset, test_dataset])
+            full_loader  = DataLoader(full_dataset,
+                                       batch_size=training_config['batch_size'],
+                                       shuffle=False,
+                                       num_workers=0)
+            lo_tensor = model.extract_layer_outputs(full_loader, device)
+            
+            # Save layer outputs to a temporary file to avoid pickling issues
+            temp_dir = Path(tempfile.gettempdir()) / 'torch_parallel_layers'
+            temp_dir.mkdir(exist_ok=True)
+            layer_outputs_path = temp_dir / f'network_{network_id}_layer_outputs.pt'
+            torch.save(lo_tensor.cpu(), layer_outputs_path)
+            
+        except Exception as e:
+            print(f"WARNING: Network {network_id} - Failed to extract layer outputs: {e}")
+            layer_outputs_path = None
 
-    return network_id, final_loss, final_acc, layer_outputs, training_time, model_saved
+    return network_id, final_loss, final_acc, layer_outputs_path, training_time, model_saved
 
 
 class ParallelTrainer:
@@ -236,11 +246,14 @@ class ParallelTrainer:
         self.max_workers     = self.training_config.get('max_parallel_workers')
         if self.max_workers is None:
             self.max_workers = min(mp.cpu_count(), self.num_networks)
-        print(f"Initializing ParallelTrainer with {self.num_networks} networks")
-        print(f"Using {self.max_workers} parallel workers")
+        print(f"PARALLEL TRAINER INITIALIZATION:")
+        print(f"  Networks to train:       {self.num_networks}")
+        print(f"  Parallel workers:        {self.max_workers}")
+        print(f"  CPU cores available:     {mp.cpu_count()}")
 
     def prepare_data(self):
-        print("Preparing data...")
+        print("\nDATA PREPARATION:")
+        print("-" * 20)
         ds = self.data_config
         if ds.get('data_source'):
             X, y = load_data_from_file(ds['data_source'])
@@ -262,26 +275,58 @@ class ParallelTrainer:
         y_train, y_test = y[:train_size], y[train_size:]
 
         # Convert to Python lists for safe cross-process transfer
+        # This avoids numpy array pickling issues in multiprocessing
         self.data_lists = {
-            'X_train': X_train.numpy().tolist(),
-            'y_train': y_train.numpy().tolist(),
-            'X_test':  X_test.numpy().tolist(),
-            'y_test':  y_test.numpy().tolist()
+            'X_train': X_train.cpu().numpy().tolist() if X_train.is_cuda else X_train.numpy().tolist(),
+            'y_train': y_train.cpu().numpy().tolist() if y_train.is_cuda else y_train.numpy().tolist(),
+            'X_test':  X_test.cpu().numpy().tolist() if X_test.is_cuda else X_test.numpy().tolist(),
+            'y_test':  y_test.cpu().numpy().tolist() if y_test.is_cuda else y_test.numpy().tolist()
         }
-        print(f"Data prepared: {len(X_train)} train, {len(X_test)} test samples")
+        print(f"Data split completed:")
+        print(f"  Training samples:        {len(X_train)}")
+        print(f"  Testing samples:         {len(X_test)}")
+        print(f"  Split ratio:             {ds.get('split_ratio', 0.8):.1%}")
+        print(f"  Input dimension:         {X_train.shape[1]}")
+        print(f"  Data shuffled:           {ds.get('shuffle_data', True)}")
+        print("Data conversion to lists completed for multiprocessing compatibility.")
 
     def train(self):
         self.prepare_data()
-        print(f"\nStarting parallel training of {self.num_networks} networks...")
+        
+        print(f"\nPARALLEL TRAINING:")
+        print(f"{'='*50}")
+        print(f"Training {self.num_networks} networks using {self.max_workers} parallel workers...")
+        
+        # Verify that data can be pickled before starting multiprocessing
+        print("Verifying data serialization for multiprocessing...")
+        try:
+            pickle.dumps(self.data_lists)
+            # Make a clean copy of config with only basic Python types
+            clean_config = yaml.safe_load(yaml.safe_dump(self.config))
+            pickle.dumps(clean_config)
+            self.config = clean_config  # Use the clean version
+            print("Data serialization check passed.")
+        except Exception as e:
+            print(f"ERROR: Configuration or data cannot be pickled: {e}")
+            raise
+        
         seed = self.training_config.get('seed', 42)
         args = [(i, self.config, self.data_lists, seed) for i in range(self.num_networks)]
 
         start_time = time.time()
         results = []
-        # Ensure 'spawn' for macOS compatibility
-        if mp.get_start_method(allow_none=True) != 'spawn':
-            mp.set_start_method('spawn', force=True)
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        
+        # Ensure 'spawn' for macOS compatibility and to avoid pickling issues
+        try:
+            if mp.get_start_method(allow_none=True) != 'spawn':
+                mp.set_start_method('spawn', force=True)
+        except RuntimeError:
+            # Context already set, which is fine
+            pass
+            
+        # Use spawn context explicitly to ensure clean process creation
+        ctx = mp.get_context('spawn')
+        with ProcessPoolExecutor(max_workers=self.max_workers, mp_context=ctx) as executor:
             future_to_id = {executor.submit(train_single_network, arg): arg[0] for arg in args}
             for future in as_completed(future_to_id):
                 nid = future_to_id[future]
@@ -289,10 +334,11 @@ class ParallelTrainer:
                     res = future.result()
                     results.append(res)
                     _, loss, acc, _, ttime, saved = res
-                    saved_str = ' [SAVED]' if saved else ''
-                    print(f"Network {nid:3d} completed - Loss: {loss:.4f}, Acc: {acc:.4f}, Time: {ttime:.2f}s{saved_str}")
+                    saved_str = ' [Model Saved]' if saved else ' [Model Not Saved]'
+                    print(f"Network {nid:2d}: Loss={loss:.4f}, Accuracy={acc:.4f}, Time={ttime:.2f}s{saved_str}")
                 except Exception as exc:
-                    print(f"Network {nid} generated an exception: {exc}")
+                    print(f"ERROR: Network {nid} failed with exception: {exc}")
+                    results.append((nid, float('nan'), float('nan'), None, 0.0, False))
 
         total_time = time.time() - start_time
         results.sort(key=lambda x: x[0])
@@ -301,34 +347,108 @@ class ParallelTrainer:
         times  = [r[4] for r in results]
         saved_count = sum(1 for r in results if r[5])
 
-        print(f"\nTraining completed in {total_time:.2f}s")
-        print(f"Average loss: {np.mean(losses):.4f} ± {np.std(losses):.4f}")
-        print(f"Average accuracy: {np.mean(accs):.4f} ± {np.std(accs):.4f}")
-        print(f"Average training time per network: {np.mean(times):.2f}s")
-        print(f"Parallel efficiency: {sum(times)/total_time:.1f}x")
-        print(f"Models saved: {saved_count}/{self.num_networks}")
+        # Filter out failed results for statistics
+        valid_results = [r for r in results if not np.isnan(r[1])]
+        valid_losses = [r[1] for r in valid_results]
+        valid_accs = [r[2] for r in valid_results]
+        valid_times = [r[4] for r in valid_results]
+        
+        print(f"\n{'='*60}")
+        print(f"TRAINING SUMMARY")
+        print(f"{'='*60}")
+        print(f"Total training time:     {total_time:.2f} seconds")
+        print(f"Networks completed:      {len(valid_results)}/{self.num_networks}")
+        print(f"Networks failed:         {self.num_networks - len(valid_results)}")
+        
+        if valid_results:
+            print(f"Average loss:            {np.mean(valid_losses):.4f} ± {np.std(valid_losses):.4f}")
+            print(f"Average accuracy:        {np.mean(valid_accs):.4f} ± {np.std(valid_accs):.4f}")
+            print(f"Average time per network: {np.mean(valid_times):.2f} seconds")
+            print(f"Parallel efficiency:     {sum(valid_times)/total_time:.1f}x speedup")
+            print(f"Models saved:            {saved_count}/{len(valid_results)} successful networks")
+        else:
+            print("No networks completed successfully.")
+        print(f"{'='*60}")
 
         if self.config.get('layer_extraction', {}).get('enabled', False):
             self.save_layer_outputs(results)
         return results
 
     def save_layer_outputs(self, results):
-        print("\nSaving layer outputs...")
-        outs = [r[3] for r in results if r[3] is not None]
-        if not outs:
-            print("No layer outputs to save.")
+        print("\nLAYER OUTPUTS PROCESSING:")
+        print("-" * 30)
+        layer_paths = [r[3] for r in results if r[3] is not None]
+        if not layer_paths:
+            print("No layer outputs available for saving.")
             return
-        all_layer_outputs = np.stack(outs, axis=0)
+        
+        print(f"Loading layer outputs from {len(layer_paths)} networks...")
+        
+        # Load all layer outputs from temporary files
+        all_layer_outputs = []
+        failed_loads = 0
+        for i, path in enumerate(layer_paths):
+            try:
+                layer_output = torch.load(path, map_location='cpu')
+                all_layer_outputs.append(layer_output)
+                print(f"  Network {i}: Loaded layer outputs with shape {layer_output.shape}")
+                # Clean up temporary file
+                os.remove(path)
+            except Exception as e:
+                print(f"  ERROR: Could not load layer outputs for network {i}: {e}")
+                failed_loads += 1
+                continue
+        
+        if not all_layer_outputs:
+            print("ERROR: No valid layer outputs found after loading.")
+            return
+        
+        if failed_loads > 0:
+            print(f"WARNING: Failed to load layer outputs from {failed_loads} networks.")
+            
+        # Stack all layer outputs
+        print("Stacking layer outputs...")
+        try:
+            # Each layer output from torch_mlp.py has shape [1, num_layers, dataset_size, width]
+            # We need to remove the leading dimension and stack to get [num_networks, num_layers, dataset_size, width]
+            squeezed_outputs = [layer_output.squeeze(0) for layer_output in all_layer_outputs]
+            stacked_outputs = torch.stack(squeezed_outputs, dim=0)
+            print(f"Successfully stacked {len(all_layer_outputs)} layer output tensors.")
+            print(f"Individual tensor shapes before stacking: {[lo.shape for lo in all_layer_outputs]}")
+            print(f"Final stacked shape: {stacked_outputs.shape}")
+        except Exception as e:
+            print(f"ERROR: Failed to stack layer outputs: {e}")
+            return
+        
         output_dir = Path(self.config['layer_extraction'].get('output_dir', 'results/layer_outputs'))
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / 'torch_parallel_cpu_layer_outputs.pt'
-        torch.save({
-            'layer_outputs': torch.from_numpy(all_layer_outputs),
-            'config': self.config,
-            'num_networks': self.num_networks
-        }, output_file)
-        print(f"Layer outputs saved to: {output_file}")
-        print(f"Shape: {all_layer_outputs.shape}")
+        
+        print("Saving layer outputs to file...")
+        try:
+            torch.save({
+                'layer_outputs': stacked_outputs,
+                'config': self.config,
+                'num_networks': self.num_networks
+            }, output_file)
+            
+            print(f"SUCCESS: Layer outputs saved to: {output_file}")
+            print(f"Final tensor shape: {stacked_outputs.shape}")
+            print(f"Data type: {stacked_outputs.dtype}")
+            print(f"Memory usage: {stacked_outputs.numel() * stacked_outputs.element_size() / 1024**2:.1f} MB")
+            
+        except Exception as e:
+            print(f"ERROR: Failed to save layer outputs: {e}")
+            return
+        
+        # Clean up temporary directory if empty
+        temp_dir = Path(tempfile.gettempdir()) / 'torch_parallel_layers'
+        try:
+            if temp_dir.exists() and not any(temp_dir.iterdir()):
+                temp_dir.rmdir()
+                print("Cleaned up temporary directory.")
+        except:
+            pass  # Ignore cleanup errors
 
 
 if __name__ == "__main__":

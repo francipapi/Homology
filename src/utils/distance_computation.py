@@ -47,7 +47,12 @@ def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], dev
     N, D = points_tensor.shape
     
     if k >= N:
-        return points if isinstance(points, np.ndarray) else points.cpu().numpy()
+        if isinstance(points, np.ndarray):
+            return points
+        elif isinstance(points, torch.Tensor):
+            return points.cpu().numpy()
+        else:
+            return np.array(points)
     
     # Initialize arrays
     sampled_indices = torch.zeros(k, dtype=torch.long, device=device)
@@ -71,7 +76,10 @@ def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], dev
     
     # Return sampled points as numpy array
     sampled_points = points_tensor[sampled_indices, :]
-    return sampled_points.cpu().numpy()
+    if sampled_points.is_cuda or hasattr(sampled_points, 'cpu'):
+        return sampled_points.cpu().numpy()
+    else:
+        return sampled_points.numpy()
 
 
 def knn_geodesic_distance(X: np.ndarray) -> np.ndarray:

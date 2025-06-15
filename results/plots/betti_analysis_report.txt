@@ -1,0 +1,55 @@
+BETTI NUMBERS ANALYSIS REPORT
+==================================================
+
+Dataset Information:
+  Number of networks: 1
+  Number of layers: 8
+  Betti dimensions: 3 (B0, B1, B2)
+
+B₀ (Components):
+  Overall mean: 1.88
+  Overall std:  2.32
+  Min value:    1
+  Max value:    8
+
+B₁ (Loops):
+  Overall mean: 4.62
+  Overall std:  4.30
+  Min value:    0
+  Max value:    12
+
+B₂ (Voids):
+  Overall mean: 11.50
+  Overall std:  14.35
+  Min value:    0
+  Max value:    41
+
+Layer-wise Analysis:
+  Layer 1:
+    Mean total complexity: 11.00
+    Betti numbers: [8. 0. 3.]
+  Layer 2:
+    Mean total complexity: 47.00
+    Betti numbers: [ 1.  5. 41.]
+  Layer 3:
+    Mean total complexity: 43.00
+    Betti numbers: [ 1. 12. 30.]
+  Layer 4:
+    Mean total complexity: 19.00
+    Betti numbers: [ 1. 10.  8.]
+  Layer 5:
+    Mean total complexity: 12.00
+    Betti numbers: [1. 5. 6.]
+  Layer 6:
+    Mean total complexity: 10.00
+    Betti numbers: [1. 5. 4.]
+  Layer 7:
+    Mean total complexity: 1.00
+    Betti numbers: [1. 0. 0.]
+  Layer 8:
+    Mean total complexity: 1.00
+    Betti numbers: [1. 0. 0.]
+
+Configuration Used:
+  Sample points per layer: 1000
+  Max homology dimension: 2

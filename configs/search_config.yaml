@@ -1,0 +1,174 @@
+# Parameter Grid Search Configuration
+# Configuration file for systematic exploration of k-neighbors and max_edge_length parameters
+# for topological data analysis of neural network layers
+
+# Current best parameters: k=12, max_edge_length=2 --GUDHI
+# Current best parameters: k=9, max_edge_length=3 --RIPSER
+
+# Data Generation Configuration
+data:
+  dataset_type: "torus"                    # Type of synthetic dataset to generate
+  num_instances: 2                         # Reduced for quick testing
+  random_seed: 42                          # Random seed for reproducible results
+  cache_datasets: true                     # Cache generated datasets to avoid regeneration
+
+# Dataset Generation Parameters (passed to dataset.generate())
+dataset_params:
+  n_samples: 4000                          # Reduced for quick testing
+  noise_level: 0.0                        # Noise level for synthetic data
+  torus_params:
+    major_radius: 3.0                      # Major radius of torus
+    minor_radius: 1.0                      # Minor radius of torus
+
+# Sampling Configuration
+sampling:
+  use_fps: true                            # Apply Furthest Point Sampling
+  fps_num_points: 20000                      # Further reduced for quick testing
+  min_points_threshold: 100                # Minimum points required for analysis
+
+# Parameter Grid Definition
+grid_search:
+  # K-Neighbors parameter range
+  k_neighbors:
+    values: [3, 6, 9, 12, 15]                    # Reduced for quick testing
+    # Alternative: use range specification
+    # min: 3
+    # max: 25
+    # step: 2
+  
+  # Max Edge Length parameter range  
+  max_edge_length:
+    values: [2, 3, 4]                      # Reduced for quick testing
+    # Alternative: use range specification
+    # min: 1.0
+    # max: 8.0
+    # step: 1.0
+
+# Homology Computation Settings
+homology:
+  max_dimension: 2                         # Compute H0, H1, H2
+  collapse_edges: true                     # Use edge collapse optimization
+  min_persistence: 0.0                     # Minimum persistence threshold
+
+# Analysis and Metrics Configuration
+analysis:
+  # Primary metrics to compute
+  compute_betti_numbers: true              # Extract Betti numbers for each dimension
+  compute_stability: true                  # Measure variance across dataset instances
+  compute_connectivity: true               # Analyze graph connectivity properties
+  compute_timing: true                     # Track computational performance
+  
+  # Derived metrics
+  compute_complexity: true                 # Topological complexity (H1 + H2)
+  compute_signal_noise: true               # Signal-to-noise ratio analysis
+  compute_persistence_range: false         # Persistence range analysis (advanced)
+  
+  # Stability analysis
+  stability_threshold: 0.1                 # Maximum acceptable standard deviation
+  connectivity_threshold: 0.9              # Minimum fraction in largest component
+
+# Visualization Configuration
+visualization:
+  # Plot generation settings
+  create_heatmaps: true                    # Generate Betti number heatmaps
+  create_stability_plots: true             # Generate stability analysis plots
+  create_connectivity_plots: true          # Generate connectivity analysis
+  create_sensitivity_plots: true           # Parameter sensitivity analysis
+  create_timing_plots: true                # Computational cost analysis
+  
+  # Plot styling
+  figure_size: [12, 8]                     # Default figure size (width, height)
+  dpi: 300                                 # Resolution for saved plots
+  colormap: "viridis"                      # Default colormap for heatmaps
+  save_format: "png"                       # Plot save format (png, pdf, svg)
+  
+  # Heatmap specific settings
+  heatmap_annotation: true                 # Show values on heatmap cells
+  heatmap_fmt: ".1f"                       # Number format for annotations
+  
+  # Color scales
+  betti_colormap: "plasma"                 # Colormap for Betti number heatmaps
+  stability_colormap: "Reds"               # Colormap for stability plots
+  connectivity_colormap: "Blues"           # Colormap for connectivity plots
+
+# Output Configuration
+output:
+  # Directory settings
+  output_dir: "results/parameter_search"   # Base output directory
+  create_subdirs: true                     # Create subdirectories for organization
+  
+  # File naming
+  timestamp_files: true                    # Add timestamp to output files
+  prefix: "grid_search"                    # Prefix for output files
+  
+  # Data output
+  save_raw_results: true                   # Save complete results matrix
+  save_summary_stats: true                 # Save summary statistics
+  save_recommendations: true               # Save parameter recommendations
+  output_format: "pytorch"                 # Format: "pytorch", "numpy", or "csv"
+  compress_output: true                    # Compress output files
+  
+  # Plot output
+  save_individual_plots: true              # Save each plot separately
+  save_combined_report: true               # Create multi-page PDF report
+  plot_directory: "plots"                  # Subdirectory for plots
+
+# Parameter Recommendation Settings
+recommendation:
+  # Selection criteria weights (0.0 to 1.0)
+  stability_weight: 0.4                    # Weight for parameter stability
+  connectivity_weight: 0.3                # Weight for graph connectivity
+  complexity_weight: 0.2                   # Weight for topological complexity
+  efficiency_weight: 0.1                   # Weight for computational efficiency
+  
+  # Filtering criteria
+  max_computation_time: 60.0               # Maximum acceptable computation time (seconds)
+  min_connectivity: 0.05                   # Minimum connectivity requirement (relaxed for k-NN graphs)
+  max_stability_variance: 50.0             # Maximum acceptable variance (relaxed for Betti numbers)
+  
+  # Number of recommendations
+  top_n_recommendations: 5                 # Number of top parameter sets to recommend
+  
+  # Recommendation categories
+  recommend_fast: true                     # Include computationally efficient options
+  recommend_stable: true                   # Include most stable options  
+  recommend_balanced: true                 # Include balanced trade-off options
+
+# Performance and Resource Management
+performance:
+  # Parallel processing
+  use_parallel: false                      # Enable parallel parameter testing
+  num_workers: 4                           # Number of parallel workers
+  
+  # Memory management
+  max_memory_gb: 8.0                       # Maximum memory usage limit
+  clear_cache_frequency: 10                # Clear cache every N parameter combinations
+  
+  # Progress tracking
+  show_progress: true                      # Display progress information
+  progress_frequency: 5                    # Update progress every N combinations
+  save_checkpoints: true                   # Save intermediate results
+  checkpoint_frequency: 20                 # Save checkpoint every N combinations
+
+# Logging Configuration
+logging:
+  level: "INFO"                            # Logging level (DEBUG, INFO, WARNING, ERROR)
+  log_to_file: true                        # Save logs to file
+  log_to_console: true                     # Display logs in console
+  log_file: "parameter_search.log"         # Log file name
+  detailed_timing: false                   # Log detailed timing information
+
+# Advanced Options
+advanced:
+  # Adaptive grid refinement
+  enable_refinement: false                 # Enable adaptive grid refinement around promising regions
+  refinement_threshold: 0.1                # Threshold for refinement trigger
+  refinement_resolution: 2                 # Refinement factor for promising regions
+  
+  # Statistical analysis
+  confidence_interval: 0.95                # Confidence interval for stability analysis
+  bootstrap_samples: 100                   # Number of bootstrap samples for robust statistics
+  
+  # Custom analysis
+  custom_metrics: []                       # List of custom metric functions to apply
+  custom_plots: []                         # List of custom plotting functions

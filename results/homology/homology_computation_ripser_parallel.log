@@ -1,0 +1,19 @@
+Parallel Homology Computation Log (Ripser)
+=========================================
+Start time: Sun Jun 15 02:36:09 2025
+Total computation time: 2.14 seconds
+Implementation: Ripser (fast Vietoris-Rips persistent homology)
+Parallelization: Option C (Mixed Task Parallelization)
+Configuration file: Unknown
+Input directory: results/layer_outputs
+Output directory: results/homology
+Max dimension: 2
+Files processed: ['torch_mlp_layer_outputs.pt']
+
+System Information:
+CPU cores: 12
+Available memory: 32.00 GB
+
+torch_mlp_layer_outputs.pt:
+  Shape: (1, 8, 3)
+  Betti number ranges: ['[1, 8]', '[0, 12]', '[0, 41]']
