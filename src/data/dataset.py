@@ -124,7 +124,7 @@ def plot_torus_points(X, y, filename=None):
     if filename:
         fig.write_image(str(filename))
     else:
-    fig.show()
+        fig.show()
 
 def farthest_point_sampling(point_cloud, num_samples):
     """

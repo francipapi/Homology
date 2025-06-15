@@ -8,7 +8,16 @@
       "Bash(find:*)",
       "Bash(timeout:*)",
       "Bash(source:*)",
-      "Bash(conda activate:*)"
+      "Bash(conda activate:*)",
+      "Bash(conda install:*)",
+      "Bash(~/anaconda3/bin/conda run -n myenv python src/topology/compute_homology_ripser.py)",
+      "Bash(/opt/anaconda3/bin/conda run -n myenv python src/topology/compute_homology_ripser.py)",
+      "Bash(grep:*)",
+      "Bash(/opt/anaconda3/bin/conda run -n myenv python src/visualization/betti_curves.py)",
+      "Bash(/opt/anaconda3/bin/conda run -n myenv python visualize_betti.py --format pdf)",
+      "Bash(/opt/anaconda3/bin/conda run -n myenv python debug_homology.py)",
+      "Bash(/opt/anaconda3/bin/conda run -n myenv python visualize_betti.py)",
+      "Bash(rm:*)"
     ],
     "deny": []
   },

@@ -1,0 +1,20 @@
+- justification: high stability across datasets; 100% computation success rate
+  k: 12
+  max_edge_length: 4
+  score: 0.43511663748311463
+- justification: high stability across datasets; 100% computation success rate
+  k: 12
+  max_edge_length: 2
+  score: 0.43168031000540735
+- justification: high stability across datasets; 100% computation success rate
+  k: 15
+  max_edge_length: 2
+  score: 0.43159342785715404
+- justification: high stability across datasets; 100% computation success rate
+  k: 6
+  max_edge_length: 4
+  score: 0.431489599581313
+- justification: high stability across datasets; 100% computation success rate
+  k: 9
+  max_edge_length: 3
+  score: 0.43132222187089864

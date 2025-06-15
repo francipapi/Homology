@@ -1,0 +1,176 @@
+2025-06-14 23:57:24,969 - INFO - Starting complete parameter grid search analysis with Ripser
+2025-06-14 23:57:24,969 - INFO - Starting parameter grid search with Ripser...
+2025-06-14 23:57:24,969 - INFO - Note: Ripser typically provides 5-100x speedup over Gudhi
+2025-06-14 23:57:24,969 - INFO - Generating datasets for grid search...
+2025-06-14 23:57:24,969 - INFO - Generating dataset instance 1/2
+2025-06-14 23:57:42,016 - INFO - Generating dataset instance 2/2
+2025-06-14 23:58:00,867 - INFO - Generated 2 valid datasets
+2025-06-14 23:58:00,867 - INFO - Testing 5 k-values × 3 edge lengths × 2 datasets = 30 combinations
+2025-06-14 23:58:00,868 - INFO - Testing k=3, max_edge_length=2
+2025-06-14 23:58:10,859 - INFO - Testing k=3, max_edge_length=3
+2025-06-14 23:58:21,027 - INFO - Testing k=3, max_edge_length=4
+2025-06-14 23:58:26,582 - INFO - Progress: 16.7% (5/30) - Avg Ripser time: 2.079s
+2025-06-14 23:58:32,184 - INFO - Testing k=6, max_edge_length=2
+2025-06-14 23:58:42,534 - INFO - Testing k=6, max_edge_length=3
+2025-06-14 23:58:55,198 - INFO - Progress: 33.3% (10/30) - Avg Ripser time: 2.378s
+2025-06-14 23:58:55,199 - INFO - Testing k=6, max_edge_length=4
+2025-06-14 23:59:14,081 - INFO - Testing k=9, max_edge_length=2
+2025-06-14 23:59:25,549 - INFO - Testing k=9, max_edge_length=3
+2025-06-14 23:59:34,445 - INFO - Progress: 50.0% (15/30) - Avg Ripser time: 3.175s
+2025-06-14 23:59:43,369 - INFO - Testing k=9, max_edge_length=4
+2025-06-15 00:00:18,214 - INFO - Testing k=12, max_edge_length=2
+2025-06-15 00:00:31,351 - INFO - Progress: 66.7% (20/30) - Avg Ripser time: 4.456s
+2025-06-15 00:00:31,351 - INFO - Testing k=12, max_edge_length=3
+2025-06-15 00:00:57,678 - INFO - Testing k=12, max_edge_length=4
+2025-06-15 00:02:10,550 - INFO - Testing k=15, max_edge_length=2
+2025-06-15 00:02:18,323 - INFO - Progress: 83.3% (25/30) - Avg Ripser time: 7.223s
+2025-06-15 00:02:26,089 - INFO - Testing k=15, max_edge_length=3
+2025-06-15 00:03:03,391 - INFO - Testing k=15, max_edge_length=4
+2025-06-15 00:05:40,729 - INFO - Progress: 100.0% (30/30) - Avg Ripser time: 12.242s
+2025-06-15 00:05:40,730 - INFO - Grid search completed successfully!
+2025-06-15 00:05:40,730 - INFO - Total Ripser computation time: 367.25s
+2025-06-15 00:05:40,730 - INFO - Average Ripser time per computation: 12.242s
+2025-06-15 00:05:40,730 - INFO - Computing summary statistics...
+2025-06-15 00:05:40,732 - INFO - Computed summary statistics for 15 parameter combinations
+2025-06-15 00:05:40,732 - INFO - Generating visualizations...
+2025-06-15 00:05:41,402 - INFO - Saved Betti heatmaps to results/parameter_search/plots/betti_heatmaps_ripser.png
+2025-06-15 00:05:41,974 - INFO - Saved stability plots to results/parameter_search/plots/stability_plots_ripser.png
+2025-06-15 00:05:42,420 - INFO - Saved connectivity plots to results/parameter_search/plots/connectivity_plots_ripser.png
+2025-06-15 00:05:43,375 - INFO - Saved sensitivity plots to results/parameter_search/plots/sensitivity_plots_ripser.png
+2025-06-15 00:05:44,084 - INFO - Saved timing plots to results/parameter_search/plots/timing_plots_ripser.png
+2025-06-15 00:05:44,084 - INFO - Creating combined PDF report...
+2025-06-15 00:05:44,653 - INFO - Saved Betti heatmaps to results/parameter_search/plots/betti_heatmaps_ripser.png
+2025-06-15 00:05:45,252 - INFO - Saved stability plots to results/parameter_search/plots/stability_plots_ripser.png
+2025-06-15 00:05:45,707 - INFO - Saved connectivity plots to results/parameter_search/plots/connectivity_plots_ripser.png
+2025-06-15 00:05:46,662 - INFO - Saved sensitivity plots to results/parameter_search/plots/sensitivity_plots_ripser.png
+2025-06-15 00:05:47,382 - INFO - Saved timing plots to results/parameter_search/plots/timing_plots_ripser.png
+2025-06-15 00:05:47,407 - INFO - Saved combined report to results/parameter_search/parameter_search_report_ripser.pdf
+2025-06-15 00:05:47,407 - INFO - Generating parameter recommendations...
+2025-06-15 00:05:47,407 - INFO - Generated 5 parameter recommendations
+2025-06-15 00:05:47,407 - INFO - Saving results...
+2025-06-15 00:05:47,439 - INFO - Saved raw results to results/parameter_search/data/raw_results_ripser.pt
+2025-06-15 00:05:47,439 - INFO - Saved summary statistics to results/parameter_search/data/summary_statistics_ripser.pkl
+2025-06-15 00:05:47,441 - INFO - Saved recommendations to results/parameter_search/data/recommendations_ripser.yaml
+2025-06-15 00:05:47,441 - INFO - Complete analysis finished in 502.47 seconds
+2025-06-15 00:24:07,848 - INFO - Starting complete parameter grid search analysis with Ripser
+2025-06-15 00:24:07,849 - INFO - Starting parameter grid search with Ripser...
+2025-06-15 00:24:07,849 - INFO - Note: Ripser typically provides 5-100x speedup over Gudhi
+2025-06-15 00:24:07,849 - INFO - Generating datasets for grid search...
+2025-06-15 00:24:07,849 - INFO - Generating dataset instance 1/2
+2025-06-15 00:24:45,955 - INFO - Generating dataset instance 2/2
+2025-06-15 00:25:23,919 - INFO - Generated 2 valid datasets
+2025-06-15 00:25:23,920 - INFO - Testing 5 k-values × 3 edge lengths × 2 datasets = 30 combinations
+2025-06-15 00:25:23,920 - INFO - Testing k=3, max_edge_length=2
+2025-06-15 00:29:59,213 - INFO - Starting complete parameter grid search analysis with Ripser
+2025-06-15 00:29:59,213 - INFO - Starting parameter grid search with Ripser...
+2025-06-15 00:29:59,213 - INFO - Note: Ripser typically provides 5-100x speedup over Gudhi
+2025-06-15 00:29:59,213 - INFO - Generating datasets for grid search...
+2025-06-15 00:29:59,213 - INFO - Generating dataset instance 1/2
+2025-06-15 00:29:59,240 - WARNING - Large FPS sampling (20000 points) may cause Ripser overflow errors
+2025-06-15 00:29:59,240 - WARNING - Consider reducing fps_num_points to 1000-2000 for stability
+2025-06-15 00:30:22,117 - INFO - Generating dataset instance 2/2
+2025-06-15 00:30:22,166 - WARNING - Large FPS sampling (20000 points) may cause Ripser overflow errors
+2025-06-15 00:30:22,166 - WARNING - Consider reducing fps_num_points to 1000-2000 for stability
+2025-06-15 00:30:43,751 - INFO - Generated 2 valid datasets
+2025-06-15 00:30:43,751 - INFO - Testing 5 k-values × 3 edge lengths × 2 datasets = 30 combinations
+2025-06-15 00:30:43,752 - INFO - Testing k=3, max_edge_length=2
+2025-06-15 00:30:47,918 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:30:47,918 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:30:54,935 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:30:54,935 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:30:57,912 - INFO - Testing k=3, max_edge_length=3
+2025-06-15 00:31:02,014 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:02,015 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:09,153 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:09,153 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:12,238 - INFO - Testing k=3, max_edge_length=4
+2025-06-15 00:31:16,351 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:16,351 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:19,734 - INFO - Progress: 16.7% (5/30) - Avg Ripser time: 3.055s
+2025-06-15 00:31:23,776 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:23,776 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:27,097 - INFO - Testing k=6, max_edge_length=2
+2025-06-15 00:31:31,211 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:31,211 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:38,525 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:38,525 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:41,747 - INFO - Testing k=6, max_edge_length=3
+2025-06-15 00:31:45,812 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:45,813 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:53,502 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:31:53,502 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:31:57,174 - INFO - Progress: 33.3% (10/30) - Avg Ripser time: 3.209s
+2025-06-15 00:31:57,174 - INFO - Testing k=6, max_edge_length=4
+2025-06-15 00:32:01,314 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:01,314 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:09,832 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:09,833 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:14,410 - INFO - Testing k=9, max_edge_length=2
+2025-06-15 00:32:18,546 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:18,546 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:26,364 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:26,365 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:29,835 - INFO - Testing k=9, max_edge_length=3
+2025-06-15 00:32:33,939 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:33,939 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:38,004 - INFO - Progress: 50.0% (15/30) - Avg Ripser time: 3.471s
+2025-06-15 00:32:42,011 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:42,011 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:46,129 - INFO - Testing k=9, max_edge_length=4
+2025-06-15 00:32:50,170 - WARNING - Large dataset (20000 points) may cause memory issues or overflow
+2025-06-15 00:32:50,170 - WARNING - Reduced max_dimension to 1 for large dataset
+2025-06-15 00:32:55,756 - INFO - Analysis interrupted by user
+2025-06-15 00:33:08,945 - INFO - Starting complete parameter grid search analysis with Ripser
+2025-06-15 00:33:08,945 - INFO - Starting parameter grid search with Ripser...
+2025-06-15 00:33:08,945 - INFO - Note: Ripser typically provides 5-100x speedup over Gudhi
+2025-06-15 00:33:08,945 - INFO - Generating datasets for grid search...
+2025-06-15 00:33:08,945 - INFO - Generating dataset instance 1/2
+2025-06-15 00:33:32,992 - INFO - Generating dataset instance 2/2
+2025-06-15 00:33:57,553 - INFO - Generated 2 valid datasets
+2025-06-15 00:33:57,554 - INFO - Testing 5 k-values × 3 edge lengths × 2 datasets = 30 combinations
+2025-06-15 00:33:57,554 - INFO - Testing k=3, max_edge_length=2
+2025-06-15 00:34:11,983 - INFO - Testing k=3, max_edge_length=3
+2025-06-15 00:34:26,936 - INFO - Testing k=3, max_edge_length=4
+2025-06-15 00:34:35,009 - INFO - Progress: 16.7% (5/30) - Avg Ripser time: 3.327s
+2025-06-15 00:34:43,077 - INFO - Testing k=6, max_edge_length=2
+2025-06-15 00:34:58,213 - INFO - Testing k=6, max_edge_length=3
+2025-06-15 00:35:16,429 - INFO - Progress: 33.3% (10/30) - Avg Ripser time: 3.752s
+2025-06-15 00:35:16,429 - INFO - Testing k=6, max_edge_length=4
+2025-06-15 00:35:42,691 - INFO - Testing k=9, max_edge_length=2
+2025-06-15 00:35:59,134 - INFO - Testing k=9, max_edge_length=3
+2025-06-15 00:36:11,365 - INFO - Progress: 50.0% (15/30) - Avg Ripser time: 4.789s
+2025-06-15 00:36:23,583 - INFO - Testing k=9, max_edge_length=4
+2025-06-15 00:37:10,163 - INFO - Testing k=12, max_edge_length=2
+2025-06-15 00:37:28,648 - INFO - Progress: 66.7% (20/30) - Avg Ripser time: 6.419s
+2025-06-15 00:37:28,648 - INFO - Testing k=12, max_edge_length=3
+2025-06-15 00:38:03,370 - INFO - Testing k=12, max_edge_length=4
+2025-06-15 00:39:25,894 - INFO - Testing k=15, max_edge_length=2
+2025-06-15 00:39:36,504 - INFO - Progress: 83.3% (25/30) - Avg Ripser time: 9.411s
+2025-06-15 00:39:47,051 - INFO - Testing k=15, max_edge_length=3
+2025-06-15 00:40:35,687 - INFO - Testing k=15, max_edge_length=4
+2025-06-15 00:43:15,882 - INFO - Progress: 100.0% (30/30) - Avg Ripser time: 14.455s
+2025-06-15 00:43:15,883 - INFO - Grid search completed successfully!
+2025-06-15 00:43:15,883 - INFO - Total Ripser computation time: 433.65s
+2025-06-15 00:43:15,883 - INFO - Average Ripser time per computation: 14.455s
+2025-06-15 00:43:15,883 - INFO - Computing summary statistics...
+2025-06-15 00:43:15,885 - INFO - Computed summary statistics for 15 parameter combinations
+2025-06-15 00:43:15,885 - INFO - Generating visualizations...
+2025-06-15 00:43:16,562 - INFO - Saved Betti heatmaps to results/parameter_search/plots/betti_heatmaps_ripser.png
+2025-06-15 00:43:17,097 - INFO - Saved stability plots to results/parameter_search/plots/stability_plots_ripser.png
+2025-06-15 00:43:17,526 - INFO - Saved connectivity plots to results/parameter_search/plots/connectivity_plots_ripser.png
+2025-06-15 00:43:18,534 - INFO - Saved sensitivity plots to results/parameter_search/plots/sensitivity_plots_ripser.png
+2025-06-15 00:43:19,241 - INFO - Saved timing plots to results/parameter_search/plots/timing_plots_ripser.png
+2025-06-15 00:43:19,241 - INFO - Creating combined PDF report...
+2025-06-15 00:43:19,810 - INFO - Saved Betti heatmaps to results/parameter_search/plots/betti_heatmaps_ripser.png
+2025-06-15 00:43:20,347 - INFO - Saved stability plots to results/parameter_search/plots/stability_plots_ripser.png
+2025-06-15 00:43:20,779 - INFO - Saved connectivity plots to results/parameter_search/plots/connectivity_plots_ripser.png
+2025-06-15 00:43:21,804 - INFO - Saved sensitivity plots to results/parameter_search/plots/sensitivity_plots_ripser.png
+2025-06-15 00:43:22,527 - INFO - Saved timing plots to results/parameter_search/plots/timing_plots_ripser.png
+2025-06-15 00:43:22,559 - INFO - Saved combined report to results/parameter_search/parameter_search_report_ripser.pdf
+2025-06-15 00:43:22,559 - INFO - Generating parameter recommendations...
+2025-06-15 00:43:22,559 - INFO - Generated 5 parameter recommendations
+2025-06-15 00:43:22,559 - INFO - Saving results...
+2025-06-15 00:43:22,592 - INFO - Saved raw results to results/parameter_search/data/raw_results_ripser.pt
+2025-06-15 00:43:22,593 - INFO - Saved summary statistics to results/parameter_search/data/summary_statistics_ripser.pkl
+2025-06-15 00:43:22,595 - INFO - Saved recommendations to results/parameter_search/data/recommendations_ripser.yaml
+2025-06-15 00:43:22,595 - INFO - Complete analysis finished in 613.65 seconds

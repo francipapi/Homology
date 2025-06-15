@@ -1,21 +1,87 @@
-# Visualization Configuration
+# Visualization Configuration for Betti Curves
+# This file configures the visualization of Betti numbers across neural network layers
 
-# Note: The parameters in this file are intended for general plotting utilities.
-# The current `main.py` script calls `plot_curves_from_h5` for Betti curves
-# directly and may not utilize all of these settings without modification to `main.py`
-# to pass this configuration object to the plotting function.
+# Input/Output Configuration
+io:
+  input_dir: "results/homology"              # Directory containing Betti numbers data
+  output_dir: "results/plots"                # Directory to save plots
+  betti_filename: "layer_betti_numbers_ripser_parallel.pt"  # Betti numbers file
 
-plotting:
-  figure_size: [12, 8]  # Default figure size (width, height) in inches for plots
-  dpi: 100              # Dots per inch for saved figures
-  style: 'seaborn-v0_8_whitegrid' # Matplotlib style to use (e.g., 'ggplot', 'seaborn-v0_8_whitegrid')
+# Plot Configuration
+plots:
+  # Output format settings
+  format: "png"                              # Output format: png, pdf, svg
+  dpi: 300                                   # Resolution for saved plots
+  
+  # Style settings
+  style: "seaborn-v0_8"                      # Matplotlib style
+  color_palette: "husl"                      # Seaborn color palette
+  figure_size:
+    individual: [10, 6]                      # Size for individual Betti dimension plots
+    combined: [12, 8]                        # Size for combined plots (per network)
+    comparison: [15, 6]                      # Size for network comparison plots
+    summary: [14, 10]                        # Size for statistical summary plots
+  
+  # Font settings
+  fonts:
+    title_size: 14                           # Title font size
+    label_size: 12                           # Axis label font size
+    legend_size: 10                          # Legend font size
+    tick_size: 10                            # Tick label font size
+  
+  # Line and marker settings
+  line_width: 2.5                            # Line width for plots
+  marker_size: 5                             # Marker size
+  alpha: 0.8                                 # Line transparency
+  
+  # Grid and layout
+  grid_alpha: 0.3                            # Grid transparency
+  tight_layout: true                         # Use tight layout
 
-curves: # Parameters specific to plotting curves (e.g., Betti curves)
-  show_statistics: true # Whether to show statistics (mean, std) on the curve plots
-  colors: ['blue', 'green', 'orange', 'red', 'purple'] # Default list of colors for curves
-  alpha: 0.1            # Alpha transparency for shaded areas (e.g., std deviation)
-  linewidth: 2          # Line width for plotted curves
+# Analysis Configuration
+analysis:
+  # Statistical analysis settings
+  confidence_bands: true                     # Show confidence bands for multiple networks
+  show_mean_line: true                       # Show mean line across networks
+  
+  # Betti dimension settings
+  dimension_names:
+    - "B₀ (Components)"                      # Name for B0
+    - "B₁ (Loops)"                          # Name for B1  
+    - "B₂ (Voids)"                          # Name for B2
+  
+  dimension_colors:
+    - "#1f77b4"                              # Blue for B0
+    - "#ff7f0e"                              # Orange for B1
+    - "#2ca02c"                              # Green for B2
+  
+  # Layer analysis
+  layer_numbering_start: 1                   # Start layer numbering from 1
+  show_layer_transitions: true               # Show layer-to-layer changes
+  
+  # Report settings
+  generate_text_report: true                 # Generate text analysis report
+  report_precision: 2                       # Decimal places in report
 
-output:
-  format: 'png'         # Default format for saved plots (e.g., 'png', 'pdf', 'svg')
-  save_path: 'results/plots' # Default directory to save generated plots
+# Plot Types to Generate
+plot_types:
+  individual_curves: true                    # Individual plots for each Betti dimension
+  combined_curves: true                      # Combined plots showing all dimensions
+  network_comparison: true                   # Comparison between different networks
+  statistical_summary: true                 # Statistical analysis plots
+  heatmap: true                             # Heatmap visualization
+  layer_changes: true                       # Layer-to-layer change analysis
+
+# Advanced Settings
+advanced:
+  # Error handling
+  continue_on_error: true                    # Continue if some plots fail
+  verbose_output: true                       # Print detailed progress information
+  
+  # Memory and performance
+  cleanup_temp_files: true                  # Clean up temporary files after plotting
+  parallel_plotting: false                  # Enable parallel plot generation (experimental)
+  
+  # Output organization
+  create_subdirectories: false              # Create subdirectories for different plot types
+  timestamp_files: false                    # Add timestamp to output filenames
