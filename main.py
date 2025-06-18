@@ -12,10 +12,16 @@ This script orchestrates the entire process:
 8. Visualizes the Betti curves.
 """
 import os
+import sys
 import yaml
 import torch
 import numpy as np
 from pathlib import Path
+
+# Add project root to Python path for imports
+project_root = os.path.abspath(os.path.dirname(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Import from restructured modules
 from src.data.dataset import generate, plot_torus_points
@@ -63,7 +69,9 @@ def main():
     X, y = generate(
         n=data_gen_params['n'],
         big_radius=data_gen_params['big_radius'],
-        small_radius=data_gen_params['small_radius']
+        small_radius=data_gen_params['small_radius'],
+        solid=data_gen_params.get('solid', False),
+        interior_noise=data_gen_params.get('interior_noise', 0.1)
     )
     # Plot the generated dataset (e.g., torus points) for visual inspection.
     # The plot is saved to 'results/plots/torus_dataset.png'.

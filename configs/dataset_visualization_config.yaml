@@ -1,0 +1,26 @@
+# 3D Dataset Visualization Configuration
+
+dataset:
+  n_samples: 1000                    # Points per torus (reduced for faster testing)
+  big_radius: 3.0                    # Major radius of torus
+  small_radius: 1.0                  # Minor radius of torus
+  noise_level: 0.0                   # Base noise level
+
+visualization:
+  backend: "plotly"                  # 'matplotlib' or 'plotly'
+  figure_size: [10, 6]               # Figure size for matplotlib
+  point_size: 3                      # Point size in plots
+  alpha: 0.8                         # Point transparency
+  color_scheme: "class_based"        # Color scheme type
+  show_axes: true                    # Show coordinate axes
+  show_grid: true                    # Show grid lines
+
+comparison:
+  show_both: true                    # Show multiple datasets
+  interior_noise_levels: [0.05, 0.15] # Noise levels for solid tori
+
+output:
+  save_plots: true                   # Save plots to files
+  output_dir: "results/plots"        # Output directory
+  formats: ["png", "html"]           # Output formats
+  dpi: 300                          # Resolution for static plots

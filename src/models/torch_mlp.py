@@ -153,63 +153,32 @@ def load_data_from_file(file_path):
     return X, y
 
 # --- Data Generation ---
-def generate_torus_data(n_samples, big_radius, small_radius):
-    # Helper function for creating and transforming a torus pair
-    def create_transformed_torus_pair(offset, rotation_axis, rotation_angle, translation_vector):
-        torus1 = tr.creation.torus(big_radius, small_radius)
-        torus2 = tr.creation.torus(big_radius, small_radius)
-        
-        # Apply rotation to the second torus
-        rotation_matrix = tr.transformations.rotation_matrix(rotation_angle, rotation_axis)
-        torus2.apply_transform(rotation_matrix)
-        
-        # Apply translation to separate the tori
-        translation_matrix1 = tr.transformations.translation_matrix([big_radius/2, 0, 0])
-        translation_matrix2 = tr.transformations.translation_matrix([-big_radius/2, 0, 0])
-        torus2.apply_transform(translation_matrix2)
-        torus1.apply_transform(translation_matrix1)
-        
-        # Apply offsets for positioning
-        torus1.apply_transform(tr.transformations.translation_matrix(translation_vector))
-        torus2.apply_transform(tr.transformations.translation_matrix(translation_vector))
-        
-        return torus1, torus2
-
-    # Define translations
-    scale_factor = big_radius * 3
-    translations = [
-        [-scale_factor, scale_factor, scale_factor],
-        [-scale_factor, -scale_factor, scale_factor],
-        [-scale_factor, scale_factor, -scale_factor],
-        [-scale_factor, -scale_factor, -scale_factor],
-        [scale_factor, scale_factor, scale_factor],
-        [scale_factor, -scale_factor, scale_factor],
-        [scale_factor, scale_factor, -scale_factor],
-        [scale_factor, -scale_factor, -scale_factor]
-    ]
+def generate_torus_data(n_samples, big_radius, small_radius, solid=False, interior_noise=0.1):
+    """
+    Generate torus data using the centralized dataset generation functions.
     
-    # Create tori pairs with transformations
-    torus_pairs = []
-    for translation in translations:
-        torus1, torus2 = create_transformed_torus_pair(
-            offset=big_radius, 
-            rotation_axis=[1, 0, 0], 
-            rotation_angle=np.pi / 2, 
-            translation_vector=translation
-        )
-        torus_pairs.extend([torus1, torus2])
+    Parameters:
+    - n_samples: Number of points per torus
+    - big_radius: Major radius of torus
+    - small_radius: Minor radius of torus  
+    - solid: If True, generate solid tori; if False, hollow (surface-only)
+    - interior_noise: Noise level for interior points when solid=True
     
-    # Sample points from all the tori
-    sampled_points = []
-    labels = []
-    for i, torus in enumerate(torus_pairs):
-        points = np.array(torus.sample(n_samples))
-        sampled_points.append(points)
-        labels.append(np.full((n_samples, 1), i % 2))  # Alternating labels 0 and 1
+    Returns:
+    - X, y: PyTorch tensors with point cloud data and labels
+    """
+    # Import the dataset generation functions
+    import sys
+    import os
+    # Add project root to Python path if not already there
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     
-    # Concatenate results
-    X = np.concatenate(sampled_points)
-    y = np.concatenate(labels)
+    from src.data.dataset import generate
+    
+    # Use the centralized generation function
+    X, y = generate(n_samples, big_radius, small_radius, solid, interior_noise)
     
     # Convert to PyTorch tensors
     X = torch.tensor(X, dtype=torch.float32)
@@ -287,7 +256,9 @@ def train_model(config_path):
         num_samples = data_config.get('generation', {}).get('n', 1000)
         big_radius = data_config.get('generation', {}).get('big_radius', 3)
         small_radius = data_config.get('generation', {}).get('small_radius', 1)
-        X, y = generate_torus_data(num_samples, big_radius, small_radius)
+        solid = data_config.get('generation', {}).get('solid', False)
+        interior_noise = data_config.get('generation', {}).get('interior_noise', 0.1)
+        X, y = generate_torus_data(num_samples, big_radius, small_radius, solid, interior_noise)
     else:
         raise ValueError(f"Unsupported data configuration. Either set data_source or use synthetic data.")
         

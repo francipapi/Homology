@@ -135,6 +135,12 @@ def process_layer_task(task: LayerTask) -> LayerResult:
                 error_message=f"Insufficient points: {len(layer_data)} < {min_points}"
             )
         
+        # Apply normalization if enabled
+        computation_config = task.config.get('computation', {})
+        if computation_config.get('normalize_data', True):
+            # Normalize layer activations before processing
+            layer_data = (layer_data - np.mean(layer_data, axis=0, keepdims=True)) / (np.std(layer_data, axis=0, keepdims=True) + 1e-8)
+        
         # Apply sampling if dataset is too large
         sampling_config = task.config.get('sampling', {})
         max_points = sampling_config.get('fps_num_points', 1000)
@@ -153,6 +159,8 @@ def process_layer_task(task: LayerTask) -> LayerResult:
         # Compute persistent homology
         max_dimension = task.config.get('computation', {}).get('max_dimension', 1)
         max_edge_length = task.config.get('computation', {}).get('max_edge_length', 0.5)
+        
+# Remove verbose output during parallel execution
         
         betti_numbers = compute_persistent_homology_betti(
             distance_matrix.astype(np.float64), 
@@ -386,16 +394,19 @@ def compute_persistent_homology_betti(distance_matrix: np.ndarray, max_dimension
         epsilon = 1e-10
         betti_numbers = []
         
+        # Compute without verbose output during parallel execution
         for dim in range(max_dimension + 1):
             if dim < len(diagrams):
                 diagram = diagrams[dim]
                 if len(diagram) > 0:
                     births = diagram[:, 0]
                     deaths = diagram[:, 1]
+                    
                     # Count features that are born at or before max_edge_length and die after it (or are infinite)
                     persistent_features = np.sum((births <= max_edge_length + epsilon) & 
                                                ((deaths > max_edge_length + epsilon) | 
                                                 (deaths == np.inf)))
+                    
                     betti_numbers.append(int(persistent_features))
                 else:
                     betti_numbers.append(0)
@@ -459,6 +470,11 @@ def process_single_layer(layer_activations: np.ndarray, config: Dict, layer_idx:
             return [0] * (config.get('computation', {}).get('max_dimension', 1) + 1)
         
         print(f"Processing layer {layer_idx}: {layer_activations.shape}", end="", flush=True)
+        
+        # Apply normalization if enabled
+        if config.get('computation', {}).get('normalize_data', True):
+            # Normalize layer activations before processing
+            layer_activations = (layer_activations - np.mean(layer_activations, axis=0, keepdims=True)) / (np.std(layer_activations, axis=0, keepdims=True) + 1e-8)
         
         # Compute distance matrix using knn_geodesic_distance
         distance_matrix = knn_geodesic_distance(layer_activations)
@@ -709,6 +725,51 @@ def _process_tasks_sequential(tasks: List[LayerTask], layer_files: Dict, max_dim
     return aggregate_results(results, layer_files, max_dimension)
 
 
+def _print_betti_summary(all_betti_results: Dict):
+    """Print a clear summary of Betti numbers for all networks and layers."""
+    print("\nBETTI NUMBERS SUMMARY:")
+    print("=" * 50)
+    
+    for filename, betti_tensor in all_betti_results.items():
+        print(f"\nFile: {filename}")
+        print("-" * 40)
+        
+        if not hasattr(betti_tensor, 'shape'):
+            print("  No valid results")
+            continue
+            
+        num_networks, num_layers, num_dims = betti_tensor.shape
+        
+        # Print header
+        print(f"  Networks: {num_networks}, Layers: {num_layers}")
+        print("\n  Layer-wise Betti numbers:")
+        print("  " + "-" * 36)
+        print("  Layer | B0 (components) | B1 (loops) | B2 (voids)")
+        print("  " + "-" * 36)
+        
+        # Print average Betti numbers per layer across all networks
+        for layer_idx in range(num_layers):
+            avg_bettis = np.mean(betti_tensor[:, layer_idx, :], axis=0)
+            std_bettis = np.std(betti_tensor[:, layer_idx, :], axis=0)
+            
+            print(f"  {layer_idx:5d} | {avg_bettis[0]:15.1f} | {avg_bettis[1]:10.1f} | {avg_bettis[2]:10.1f}")
+            
+            # If there's variation across networks, show it
+            if num_networks > 1 and np.any(std_bettis > 0.1):
+                print(f"        | (±{std_bettis[0]:13.1f}) | (±{std_bettis[1]:8.1f}) | (±{std_bettis[2]:8.1f})")
+        
+        print("  " + "-" * 36)
+        
+        # Print overall statistics
+        print("\n  Overall statistics:")
+        for dim in range(num_dims):
+            dim_name = ["H0 (components)", "H1 (loops)", "H2 (voids)"][dim]
+            all_values = betti_tensor[:, :, dim].flatten()
+            print(f"    {dim_name}:")
+            print(f"      Range: [{all_values.min()}, {all_values.max()}]")
+            print(f"      Mean: {all_values.mean():.2f} (±{all_values.std():.2f})")
+
+
 def _report_progress(progress_tracker: ProgressTracker, initial_memory_gb: float, latest_results: List = None):
     """Report detailed progress information with Betti numbers."""
     progress = progress_tracker.get_progress()
@@ -792,6 +853,9 @@ def _save_results_and_cleanup(all_betti_results: Dict, config: Dict, output_dir:
         print(f"Total computation time: {total_time:.2f} seconds")
         print(f"Results tensor shape: {results_tensor.shape if hasattr(results_tensor, 'shape') else 'Dictionary format'}")
         print(f"Output directory: {output_dir}")
+        
+        # Print Betti numbers summary
+        _print_betti_summary(all_betti_results)
         print(f"Files processed: {len(all_betti_results)}")
         
         # Memory cleanup

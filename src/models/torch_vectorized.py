@@ -199,7 +199,9 @@ class VectorizedTrainer:
             num_samples = data_config.get('generation', {}).get('n', 1000)
             big_radius = data_config.get('generation', {}).get('big_radius', 3)
             small_radius = data_config.get('generation', {}).get('small_radius', 1)
-            X_cpu, y_cpu = generate_torus_data(num_samples, big_radius, small_radius)
+            solid = data_config.get('generation', {}).get('solid', False)
+            interior_noise = data_config.get('generation', {}).get('interior_noise', 0.1)
+            X_cpu, y_cpu = generate_torus_data(num_samples, big_radius, small_radius, solid, interior_noise)
         else:
             raise ValueError(f"Unsupported data configuration. Either set data_source or use synthetic data.")
             

@@ -261,7 +261,9 @@ class ParallelTrainer:
             gen = ds.get('generation', {})
             X, y = generate_torus_data(gen.get('n',1000),
                                        gen.get('big_radius',3),
-                                       gen.get('small_radius',1))
+                                       gen.get('small_radius',1),
+                                       gen.get('solid', False),
+                                       gen.get('interior_noise', 0.1))
         else:
             raise ValueError("Unsupported data configuration. Either set data_source or use synthetic data.")
         if ds.get('shuffle_data', True):

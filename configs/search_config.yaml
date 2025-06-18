@@ -8,7 +8,7 @@
 # Data Generation Configuration
 data:
   dataset_type: "torus"                    # Type of synthetic dataset to generate
-  num_instances: 2                         # Reduced for quick testing
+  num_instances: 1                         # Reduced for quick testing
   random_seed: 42                          # Random seed for reproducible results
   cache_datasets: true                     # Cache generated datasets to avoid regeneration
 
@@ -19,18 +19,20 @@ dataset_params:
   torus_params:
     major_radius: 3.0                      # Major radius of torus
     minor_radius: 1.0                      # Minor radius of torus
+    solid: false                           # Generate solid (true) or hollow (false) tori
+    interior_noise: 0.1                    # Noise level for interior points when solid=true
 
 # Sampling Configuration
 sampling:
   use_fps: true                            # Apply Furthest Point Sampling
-  fps_num_points: 20000                      # Further reduced for quick testing
+  fps_num_points: 12000                      # Further reduced for quick testing
   min_points_threshold: 100                # Minimum points required for analysis
 
 # Parameter Grid Definition
 grid_search:
   # K-Neighbors parameter range
   k_neighbors:
-    values: [3, 6, 9, 12, 15]                    # Reduced for quick testing
+    values: [15, 17, 20, 22, 25]                    # Reduced for quick testing
     # Alternative: use range specification
     # min: 3
     # max: 25
@@ -38,7 +40,7 @@ grid_search:
   
   # Max Edge Length parameter range  
   max_edge_length:
-    values: [2, 3, 4]                      # Reduced for quick testing
+    values: [2, 3]                      # Reduced for quick testing
     # Alternative: use range specification
     # min: 1.0
     # max: 8.0
@@ -137,7 +139,7 @@ recommendation:
 # Performance and Resource Management
 performance:
   # Parallel processing
-  use_parallel: false                      # Enable parallel parameter testing
+  use_parallel: true                      # Enable parallel parameter testing
   num_workers: 4                           # Number of parallel workers
   
   # Memory management
@@ -146,7 +148,7 @@ performance:
   
   # Progress tracking
   show_progress: true                      # Display progress information
-  progress_frequency: 5                    # Update progress every N combinations
+  progress_frequency: 5                   # Update progress every N combinations
   save_checkpoints: true                   # Save intermediate results
   checkpoint_frequency: 20                 # Save checkpoint every N combinations
 

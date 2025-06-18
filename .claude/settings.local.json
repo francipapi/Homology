@@ -19,7 +19,12 @@
       "Bash(/opt/anaconda3/bin/conda run -n myenv python visualize_betti.py)",
       "Bash(rm:*)",
       "Bash(chmod:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(conda info:*)",
+      "WebFetch(domain:gudhi.inria.fr)",
+      "Bash(/opt/anaconda3/envs/myenv/bin/python:*)",
+      "Bash(./run_witness_test.sh:*)",
+      "Bash(time python:*)"
     ],
     "deny": []
   },

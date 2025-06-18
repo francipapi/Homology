@@ -38,7 +38,7 @@ import warnings
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.data.dataset import generate
-from src.utils.distance_computation import farthest_point_sampling_pytorch
+from src.utils.distance_computation import farthest_point_sampling_pytorch, knn_geodesic_distance
 
 
 class ParameterGridSearchRipser:
@@ -129,7 +129,9 @@ class ParameterGridSearchRipser:
             X, y = generate(
                 n=dataset_config['n_samples'],
                 big_radius=torus_params.get('major_radius', 1.0),
-                small_radius=torus_params.get('minor_radius', 0.3)
+                small_radius=torus_params.get('minor_radius', 0.3),
+                solid=torus_params.get('solid', False),
+                interior_noise=torus_params.get('interior_noise', 0.1)
             )
             
             # Apply FPS sampling if enabled
@@ -137,9 +139,9 @@ class ParameterGridSearchRipser:
                 fps_points = self.config['sampling']['fps_num_points']
                 self.logger.debug(f"Applying FPS: {len(X)} -> {fps_points} points")
                 
-                # Use efficient FPS implementation with device acceleration
+                # Use centralized FPS implementation from distance_computation.py
                 fps_start_time = time.time()
-                X_sampled = self.manual_fps_sampling(X, fps_points, device='auto')
+                X_sampled = farthest_point_sampling_pytorch(X, device='auto')
                 fps_time = time.time() - fps_start_time
                 self.logger.debug(f"FPS sampling completed in {fps_time:.3f}s: {len(X)} -> {len(X_sampled)} points")
                 
@@ -157,81 +159,9 @@ class ParameterGridSearchRipser:
         self.datasets = datasets
         return datasets
     
-    def manual_fps_sampling(self, points: np.ndarray, k: int, device: str = 'auto') -> np.ndarray:
-        """
-        Efficient FPS implementation matching distance_computation.py for better performance.
-        
-        Parameters:
-            points: Input points array
-            k: Number of points to sample
-            device: Device to use ('auto', 'cpu', 'cuda', 'mps')
-        
-        Returns:
-            Sampled points array
-        """
-        import torch
-        
-        # Auto-detect best device for acceleration
-        if device == 'auto':
-            if torch.cuda.is_available():
-                device = 'cuda'
-            elif torch.backends.mps.is_available():
-                device = 'mps'
-            else:
-                device = 'cpu'
-        
-        # Convert to torch tensor with proper device placement
-        if isinstance(points, np.ndarray):
-            points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
-        elif isinstance(points, torch.Tensor):
-            points_tensor = points.float().to(device)
-        else:
-            points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
-        
-        N, D = points_tensor.shape
-        
-        if k >= N:
-            return points if isinstance(points, np.ndarray) else points.cpu().numpy()
-        
-        # Initialize arrays on the correct device
-        sampled_indices = torch.zeros(k, dtype=torch.long, device=device)
-        distances = torch.full((N,), float('inf'), device=device)
-        
-        # Randomly select first point
-        sampled_indices[0] = torch.randint(0, N, (1,), device=device)
-        last_sampled = points_tensor[sampled_indices[0], :]
-        
-        for i in range(1, k):
-            # Compute squared Euclidean distances from last sampled point to all points
-            diff = points_tensor - last_sampled.unsqueeze(0)
-            dist_sq = torch.sum(diff ** 2, dim=1)
-            
-            # Update minimum distances
-            distances = torch.minimum(distances, dist_sq)
-            
-            # Select point with maximum distance
-            sampled_indices[i] = torch.argmax(distances)
-            last_sampled = points_tensor[sampled_indices[i], :]
-        
-        # Return sampled points as numpy array
-        sampled_points = points_tensor[sampled_indices, :]
-        return sampled_points.cpu().numpy()
+    # Removed manual_fps_sampling - now using farthest_point_sampling_pytorch from distance_computation.py
     
-    def compute_knn_geodesic_distance(self, X: np.ndarray, k: int) -> np.ndarray:
-        """
-        Compute k-NN geodesic distance matrix.
-        
-        Parameters:
-            X: Input points array
-            k: Number of nearest neighbors
-        
-        Returns:
-            Integer distance matrix
-        """
-        graph = kneighbors_graph(X, k, mode='connectivity', p=2, n_jobs=-1)
-        g = gt.Graph(sp.sparse.lil_matrix(graph), directed=False)
-        distance_matrix = shortest_distance(g)
-        return np.array(distance_matrix.get_2d_array(), dtype=np.int32)
+    # Removed compute_knn_geodesic_distance - now using knn_geodesic_distance from distance_computation.py
     
     def compute_persistent_homology(self, distance_matrix: np.ndarray, 
                                    max_edge_length: float) -> Dict[str, Any]:
@@ -362,8 +292,9 @@ class ParameterGridSearchRipser:
         X = self.datasets[dataset_idx]
         
         try:
-            # Compute distance matrix
-            distance_matrix = self.compute_knn_geodesic_distance(X, k)
+            # Compute distance matrix using centralized function with specific k
+            # Note: use_fps=False because we already applied FPS in generate_datasets
+            distance_matrix = knn_geodesic_distance(X, k=k, use_fps=False)
             
             # Analyze connectivity
             connectivity_metrics = self.analyze_graph_connectivity(X, k)

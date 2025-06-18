@@ -15,7 +15,7 @@ def load_config(config_path: str = "configs/homology_config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], device: str = 'auto') -> np.ndarray:
+def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], device: str = 'auto', k: Optional[int] = None) -> np.ndarray:
     """
     Perform Farthest Point Sampling (FPS) on a set of points using PyTorch.
     
@@ -35,7 +35,10 @@ def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], dev
             device = 'cpu'
     
     config = load_config()
-    k = config['sampling']['fps_num_points']
+    if k is None:
+        k = config['sampling']['fps_num_points']
+    normalization = config['sampling'].get('normalization', False)
+    
     # Convert to torch tensor if needed
     if isinstance(points, np.ndarray):
         points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
@@ -43,6 +46,11 @@ def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], dev
         points_tensor = points.float().to(device)
     else:
         points_tensor = torch.tensor(points, dtype=torch.float32, device=device)
+    
+    # Apply normalization if enabled
+    if normalization:
+        # Normalize along each dimension (feature-wise normalization)
+        points_tensor = (points_tensor - points_tensor.mean(dim=0, keepdim=True)) / (points_tensor.std(dim=0, keepdim=True) + 1e-8)
     
     N, D = points_tensor.shape
     
@@ -82,21 +90,24 @@ def farthest_point_sampling_pytorch(points: Union[np.ndarray, torch.Tensor], dev
         return sampled_points.numpy()
 
 
-def knn_geodesic_distance(X: np.ndarray) -> np.ndarray:
+def knn_geodesic_distance(X: np.ndarray, k: Optional[int] = None, use_fps: Optional[bool] = None) -> np.ndarray:
     """
     Compute geodesic distance matrix using k-nearest neighbors graph.
     Ported from original graph.py distance() function using graph_tool.
     
     Parameters:
-    - X: Input points of shape (N, D)
+    - X: Input points of shape (N, D) - should already be normalized if required
     
     Returns:
     - distance_matrix: Integer geodesic distance matrix of shape (N, N)
     """
     config = load_config()
-    k = config['distance']['k_neighbors']
+    if k is None:
+        k = config['distance']['k_neighbors']
+    if use_fps is None:
+        use_fps = config['sampling']['use_fps']
 
-    if config['sampling']['use_fps']:
+    if use_fps:
         X = farthest_point_sampling_pytorch(X)
 
     graph = kneighbors_graph(X, k, mode='connectivity', p=2, n_jobs=-1)

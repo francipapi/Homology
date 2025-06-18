@@ -101,7 +101,9 @@ def train_single_trial(trial_config: Dict[str, Any]) -> Tuple[float, float, floa
             num_samples = data_config.get('generation', {}).get('n', 1000)
             big_radius = data_config.get('generation', {}).get('big_radius', 3)
             small_radius = data_config.get('generation', {}).get('small_radius', 1)
-            X, y = generate_torus_data(num_samples, big_radius, small_radius)
+            solid = data_config.get('generation', {}).get('solid', False)
+            interior_noise = data_config.get('generation', {}).get('interior_noise', 0.1)
+            X, y = generate_torus_data(num_samples, big_radius, small_radius, solid, interior_noise)
         else:
             raise ValueError("Invalid data configuration")
         
@@ -707,7 +709,9 @@ class HyperparameterOptimizer:
             num_samples = data_config.get('generation', {}).get('n', 1000)
             big_radius = data_config.get('generation', {}).get('big_radius', 3)
             small_radius = data_config.get('generation', {}).get('small_radius', 1)
-            X, y = generate_torus_data(num_samples, big_radius, small_radius)
+            solid = data_config.get('generation', {}).get('solid', False)
+            interior_noise = data_config.get('generation', {}).get('interior_noise', 0.1)
+            X, y = generate_torus_data(num_samples, big_radius, small_radius, solid, interior_noise)
         else:
             raise ValueError("Invalid data configuration")
         
@@ -1621,7 +1625,10 @@ def main():
     print(f"Best validation accuracy: {optimizer.study.best_value:.4f}")
     print("\n🏆 Best hyperparameters:")
     for key, value in optimizer.study.best_params.items():
-        print(f"   • {key}: {value:.6f if isinstance(value, float) else value}")
+        if isinstance(value, float):
+            print(f"   • {key}: {value:.6f}")
+        else:
+            print(f"   • {key}: {value}")
     print("="*60)
     
     # Save best configuration
