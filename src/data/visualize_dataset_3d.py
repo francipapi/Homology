@@ -68,7 +68,7 @@ class TorusDataset3DVisualizer:
         """Get default visualization configuration."""
         return {
             'dataset': {
-                'n_samples': 2000,
+                'n_samples': 4000,
                 'big_radius': 3.0,
                 'small_radius': 1.0,
                 'noise_level': 0.0

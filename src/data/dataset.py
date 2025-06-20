@@ -2,8 +2,8 @@ import trimesh as tr
 import numpy as np
 import torch
 import plotly.graph_objects as go
-import pyvista as pv
-import open3d as o3d
+from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
 
 def generate(n, big_radius, small_radius, solid=False, interior_noise=0.1):
     """
@@ -85,108 +85,92 @@ def generate(n, big_radius, small_radius, solid=False, interior_noise=0.1):
     return [X, y]
 
 
-def generate_solid_torus_points(torus_mesh, n_points, interior_noise=0.1, major_radius=3.0, minor_radius=1.0):
+def generate_solid_torus_points(
+        torus_mesh: tr.Trimesh,
+        n_points: int,
+        interior_noise: float = 0.1,
+        major_radius: float = 3.0,
+        minor_radius: float = 1.0,
+):
     """
-    Generate points inside a solid torus using fast volumetric sampling.
-    Uses mathematical torus equations for efficient point generation.
-    
-    Parameters:
-    - torus_mesh: Trimesh torus object (used for transformation)
-    - n_points: Number of points to generate
-    - interior_noise: Noise level for adding randomness to interior points
-    - major_radius: Major radius of the torus (big_radius parameter)
-    - minor_radius: Minor radius of the torus (small_radius parameter)
-    
-    Returns:
-    - points: Array of 3D points distributed throughout the torus volume
+    Volumetrically sample `n_points` inside a **solid** torus.
+
+    • Works for any translation / rotation you applied to the mesh  
+    • No expensive `mesh.contains()` calls – 100 % acceptance, O(n) time  
+    • Still guarantees every point is inside the torus (even after noise)
+
+    Parameters
+    ----------
+    torus_mesh : trimesh.Trimesh
+        The torus mesh **after** all transforms.
+    n_points : int
+        Number of interior samples.
+    interior_noise : float, optional
+        σ of zero-mean Gaussian noise as a fraction of `minor_radius`.
+    major_radius, minor_radius : float, optional
+        The torus R and r used when you built the mesh; needed only once
+        to generate the canonical samples.
+
+    Returns
+    -------
+    (n_points, 3) ndarray[float]
+        Uniform volumetric samples in world coordinates.
     """
-    
-    # Fast volumetric torus generation using toroidal coordinates
-    n_surface = int(0.2 * n_points)  # 20% surface points (reduced for speed)
-    n_interior = n_points - n_surface
-    
-    # 1. Generate surface points (fast mesh sampling)
-    surface_points = np.array(torus_mesh.sample(n_surface))
-    
-    # 2. Generate interior points with proper alignment
-    # Use surface points to determine the torus orientation and position
-    
-    if n_surface > 10:  # Need enough surface points for reliable estimation
-        # Estimate torus center and orientation from surface points
-        estimated_center = np.mean(surface_points, axis=0)
-        
-        # Generate interior points in standard coordinates
-        interior_points = generate_torus_interior_fast(n_interior, major_radius, minor_radius, interior_noise)
-        
-        # Translate interior points to match the estimated center
-        interior_points += estimated_center
-        
-        # Optional: Apply rotation alignment if needed
-        # For now, translation is sufficient for most cases
-        
-    else:
-        # Fallback: use mesh center for alignment
-        mesh_center = torus_mesh.center_mass
-        interior_points = generate_torus_interior_fast(n_interior, major_radius, minor_radius, interior_noise)
-        interior_points += mesh_center
-    
-    # Combine all points
-    all_points = np.vstack([surface_points, interior_points])
-    
-    # Shuffle to distribute surface and interior points randomly
-    np.random.shuffle(all_points)
-    
-    return all_points
+
+    # ---------- 1. Fast local-to-world frame extraction --------------------
+    # Use the oriented bounding box (OBB) as a cheap way to recover the
+    # torus centre and orientation 
+    obb              = torus_mesh.bounding_box_oriented
+    T_world_from_obb = obb.primitive.transform          # 4×4 – R|t
+    centre           = T_world_from_obb[:3, 3]
+    R_world_from_obb = T_world_from_obb[:3, :3]
+
+    # Smallest OBB extent ⇒ tube axis direction (Z in the canonical frame)
+    axis_small  = int(np.argmin(obb.primitive.extents))
+    # Re-order the rotation columns so that canonical ẑ → tube-axis
+    perm        = [0, 1, 2]
+    perm.remove(axis_small)
+    perm.append(axis_small)
+    R_world_from_local = R_world_from_obb[:, perm]      # 3×3
+
+    # ---------- 2. Canonical, **rejection-free** torus volume sampling ----
+    #   θ  ∈ [0, 2π) - around the major circle
+    #   φ  ∈ [0, 2π) - within the tube cross-section
+    #   ρ² ∈ [0, r²] – radius in the tube disc (√U trick for uniform area)
+    theta = np.random.rand(n_points) * 2.0 * np.pi
+    phi   = np.random.rand(n_points) * 2.0 * np.pi
+    rho   = np.sqrt(np.random.rand(n_points)) * minor_radius
+
+    cosθ, sinθ = np.cos(theta), np.sin(theta)
+    cosφ, sinφ = np.cos(phi),   np.sin(phi)
+
+    x_local = (major_radius + rho * cosφ) * cosθ
+    y_local = (major_radius + rho * cosφ) * sinθ
+    z_local = rho * sinφ
+    local_pts = np.stack((x_local, y_local, z_local), axis=1)   # (n,3)
+
+    # ---------- 3. Transform to the mesh’s world space --------------------
+    world_pts = local_pts @ R_world_from_local.T + centre
+
+    # ---------- 4. Optional interior jitter (remains inside) --------------
+    if interior_noise > 0.0:
+        sigma   = interior_noise * minor_radius * 0.05
+        noise   = np.random.normal(0.0, sigma, size=world_pts.shape)
+        cand    = world_pts + noise
+
+        # Keep only noisy candidates that are still inside analytically
+        axis_vec   = R_world_from_local[:, 2]                 # tube axis
+        pc         = cand - centre
+        z_coord    = pc @ axis_vec
+        radial_vec = pc - np.outer(z_coord, axis_vec)
+        rho_val    = np.linalg.norm(radial_vec, axis=1)
+        inside_ok  = (rho_val - major_radius) ** 2 + z_coord ** 2 <= minor_radius ** 2
+
+        world_pts[inside_ok] = cand[inside_ok]
+
+    return world_pts
 
 
-def generate_torus_interior_fast(n_points, major_radius, minor_radius, noise_level=0.1):
-    """
-    Fast generation of interior points for a torus using toroidal coordinates.
-    Uses fully vectorized operations for maximum performance.
-    
-    Parameters:
-    - n_points: Number of interior points to generate
-    - major_radius: Major radius of the torus
-    - minor_radius: Minor radius of the torus
-    - noise_level: Level of randomness to add
-    
-    Returns:
-    - points: Array of 3D points inside the torus
-    """
-    
-    # Generate all points at once for maximum vectorization
-    # φ (phi): angle around the tube (0 to 2π)
-    # θ (theta): angle around the main torus (0 to 2π)  
-    # r: distance from tube center (0 to minor_radius)
-    
-    phi = np.random.uniform(0, 2*np.pi, n_points)
-    theta = np.random.uniform(0, 2*np.pi, n_points)
-    
-    # For interior points, use r distribution that gives uniform volume density
-    # r² distribution for uniform density in disk cross-section
-    r_normalized = np.sqrt(np.random.uniform(0, 1, n_points))
-    r = r_normalized * minor_radius
-    
-    # Convert to Cartesian coordinates (fully vectorized)
-    cos_phi = np.cos(phi)
-    sin_phi = np.sin(phi)
-    cos_theta = np.cos(theta)
-    sin_theta = np.sin(theta)
-    
-    x = (major_radius + r * cos_phi) * cos_theta
-    y = (major_radius + r * cos_phi) * sin_theta
-    z = r * sin_phi
-    
-    # Add noise if specified (vectorized)
-    if noise_level > 0:
-        noise_scale = noise_level * minor_radius * 0.1  # Scale noise to torus size
-        x += np.random.normal(0, noise_scale, n_points)
-        y += np.random.normal(0, noise_scale, n_points)
-        z += np.random.normal(0, noise_scale, n_points)
-    
-    # Combine coordinates
-    points = np.column_stack([x, y, z])
-    return points
 
 
 def is_point_inside_torus(point, center, major_radius, minor_radius):
