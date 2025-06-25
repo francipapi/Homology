@@ -11,22 +11,22 @@ io:
 # Sampling Configuration
 sampling:
   use_fps: true                          # Enable/disable Furthest Point Sampling
-  fps_num_points: 16000                      # Target number of points after FPS (reduced for witness complex)
+  fps_num_points: 12000                      # Target number of points after FPS (reduced for witness complex)
   min_points_threshold: 50             # Minimum points required to perform homology
   adaptive_sampling: true              # Adjust sample size based on dataset size
   max_sample_ratio: 0.01               # Maximum fraction of original data to sample (1% for testing)
-  normalization: true                # Normalize data along each dimension before FPS (disabled - normalization done in computation step)
+  normalization: false                # Normalize data along each dimension before FPS (disabled - normalization done in computation step)
 
 # Distance Matrix Configuration  
 distance:                     # "knn" (geodesic on k-NN graph) or "full" (Euclidean)
-  k_neighbors: 9                 # Number of nearest neighbors for k-NN graph construction
+  k_neighbors: 35                # Number of nearest neighbors for k-NN graph construction
   metric: "euclidian"                  # Base metric for k-NN graph edges ("euclidean", "cosine", "manhattan")
   geodesic: true                       # Use geodesic distances on k-NN graph (always true for method="knn")            # "euclidean" (actual distances) or "uniform" (all edges = 1)          # Density threshold for graph connectivity warnings
 
 # Homology Computation
 computation:
-  max_dimension: 2                # Maximum homology dimension (H0, H1, H2)
-  max_edge_length: 2               # Maximum edge length for Vietoris-Rips complex (increased for integer distances)
+  max_dimension: 1                # Maximum homology dimension (H0, H1, H2)
+  max_edge_length: 3               # Maximum edge length for Vietoris-Rips complex (increased for integer distances)
   min_persistence: 0.0                # Minimum persistence value for features
   num_neighbors: 50                   # Number of neighbors (actively used for k-NN)
   normalize_data: false               # Normalize layer activations before processing (feature-wise z-score normalization)
@@ -36,9 +36,9 @@ computation:
 witness_complex:
   # Landmark Configuration
   n_landmarks: 1000                       # Number of landmark points to select (optimized value: 50)
-  landmark_selection: "maxmin"           # Landmark selection method: "maxmin", "fps", or "random" (maxmin gives better topology coverage)
+  landmark_selection: "random"           # Landmark selection method: "maxmin", "fps", or "random" (maxmin gives better topology coverage)
   adaptive_landmarks: true            # If true, adjust landmark count based on dataset size
-  landmark_percentage: 0.01           # Percentage of points to use as landmarks when adaptive_landmarks=true
+  landmark_percentage: 0.005           # Percentage of points to use as landmarks when adaptive_landmarks=true
   min_landmarks: 20                    # Minimum number of landmarks when using adaptive sizing
   max_landmarks: 1000                   # Maximum number of landmarks when using adaptive sizing
   
@@ -55,7 +55,7 @@ witness_complex:
   
   # Complex Construction Parameters
   relaxation: 1                   # Relaxation parameter (nu) - 0 is strict, 1-2 allows more flexibility  
-  max_alpha_square: 1           # Maximum squared distance for filtration (smaller = faster, inf = no limit)
+  max_alpha_square: 2          # Maximum squared distance for filtration (smaller = faster, inf = no limit)
   witness_type: "weak"                # Type of witness complex: "weak" or "strong"
   
   # Gudhi-specific Parameters
@@ -82,7 +82,7 @@ output:
 # Parallel Processing Configuration
 parallel:
   enabled: true                     # Enable parallel processing
-  num_workers: 12                 # Number of workers (null for auto-detection)
+  num_workers: 4                # Number of workers (null for auto-detection)
   chunk_size: 1                      # Tasks per worker batch
   timeout_per_task: 300              # Timeout per task in seconds (5 minutes)
   method: "concurrent_futures"       # Parallel processing method

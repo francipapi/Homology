@@ -34,7 +34,7 @@ from typing import Tuple, Dict, Optional, List
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 try:
-    from src.data.dataset import generate, gen_easy
+    from src.data.dataset import generate, gen_easy, farthest_point_sampling
     print("✅ Successfully imported dataset generation functions")
 except ImportError as e:
     print(f"❌ Failed to import dataset functions: {e}")
@@ -53,16 +53,35 @@ class TorusDataset3DVisualizer:
         self.config = self.load_config(config_path) if config_path else self.get_default_config()
         self.data_cache = {}
         
+        # Try to load training config parameters
+        self._load_training_config_params()
+        
     def load_config(self, config_path: str) -> Dict:
         """Load configuration from YAML file."""
         try:
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
             print(f"✅ Loaded configuration from {config_path}")
-            return config
+            
+            # Merge with default config to ensure all keys exist
+            default_config = self.get_default_config()
+            
+            # Deep merge configs
+            merged_config = self._deep_merge_configs(default_config, config)
+            return merged_config
         except Exception as e:
             print(f"⚠️  Failed to load config, using defaults: {e}")
             return self.get_default_config()
+    
+    def _deep_merge_configs(self, base: Dict, override: Dict) -> Dict:
+        """Deep merge two configuration dictionaries."""
+        result = base.copy()
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge_configs(result[key], value)
+            else:
+                result[key] = value
+        return result
     
     def get_default_config(self) -> Dict:
         """Get default visualization configuration."""
@@ -84,7 +103,11 @@ class TorusDataset3DVisualizer:
             },
             'comparison': {
                 'show_both': True,  # Show both hollow and solid in same plot
-                'interior_noise_levels': [0.05, 0.1, 0.2]  # Different noise levels to compare
+                'interior_noise_levels': [0.01, 0.1, 0.2]  # Different noise levels to compare
+            },
+            'fps': {
+                'enabled': True,  # Enable FPS visualization
+                'num_samples': 12000  # Number of samples after FPS
             },
             'output': {
                 'save_plots': False,
@@ -93,6 +116,32 @@ class TorusDataset3DVisualizer:
                 'dpi': 300
             }
         }
+    
+    def _load_training_config_params(self):
+        """Load parameters from training_config.yaml if available."""
+        training_config_path = Path(__file__).parent.parent.parent / 'configs' / 'training_config.yaml'
+        
+        if training_config_path.exists():
+            try:
+                with open(training_config_path, 'r') as f:
+                    training_config = yaml.safe_load(f)
+                
+                # Update dataset parameters from training config
+                if 'data' in training_config and 'generation' in training_config['data']:
+                    gen_params = training_config['data']['generation']
+                    self.config['dataset']['n_samples'] = gen_params.get('n', self.config['dataset']['n_samples'])
+                    self.config['dataset']['big_radius'] = gen_params.get('big_radius', self.config['dataset']['big_radius'])
+                    self.config['dataset']['small_radius'] = gen_params.get('small_radius', self.config['dataset']['small_radius'])
+                    
+                    # Update solid mode and noise from training config
+                    if 'solid' in gen_params and gen_params['solid']:
+                        interior_noise = gen_params.get('interior_noise', 0.01)
+                        # Replace default noise levels with the one from training config
+                        self.config['comparison']['interior_noise_levels'] = [interior_noise]
+                    
+                    print(f"📋 Loaded dataset parameters from training_config.yaml")
+            except Exception as e:
+                print(f"⚠️  Could not load training config params: {e}")
     
     def generate_datasets(self) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
         """Generate datasets for visualization."""
@@ -120,8 +169,71 @@ class TorusDataset3DVisualizer:
                                       solid=True, interior_noise=noise)
             datasets[f'solid_noise_{noise}'] = (X_solid, y_solid)
         
+        # Generate FPS sampled datasets if enabled
+        if self.config.get('fps', {}).get('enabled', False):
+            fps_samples = self.config['fps'].get('num_samples', n_samples // 2)
+            print(f"\n🎯 Applying Farthest Point Sampling (FPS) with {fps_samples} samples...")
+            
+            # Apply FPS to the main solid dataset
+            main_noise = noise_levels[0] if noise_levels else 0.1
+            X_solid_main, y_solid_main = generate(n_samples, big_radius, small_radius, 
+                                                 solid=True, interior_noise=main_noise)
+            
+            # Apply FPS to the entire dataset (both classes together)
+            print(f"   • Applying FPS to entire dataset ({fps_samples} samples from {X_solid_main.shape[0]} points)...")
+            
+            # Get indices of sampled points from FPS
+            sampled_indices = self._farthest_point_sampling_with_indices(X_solid_main, fps_samples)
+            
+            # Extract sampled points and their corresponding labels
+            X_fps = X_solid_main[sampled_indices]
+            y_fps = y_solid_main[sampled_indices]
+            
+            # Print class distribution after FPS
+            unique, counts = np.unique(y_fps.flatten(), return_counts=True)
+            print(f"   • Class distribution after FPS: {dict(zip(unique, counts))}")
+            
+            datasets[f'solid_fps_{fps_samples}'] = (X_fps, y_fps)
+            datasets['solid_original'] = (X_solid_main, y_solid_main)
+        
         print(f"✅ Generated {len(datasets)} datasets")
         return datasets
+    
+    def _farthest_point_sampling_with_indices(self, point_cloud: np.ndarray, num_samples: int) -> np.ndarray:
+        """
+        Farthest point sampling that returns indices of sampled points.
+        
+        Parameters:
+        - point_cloud: np.ndarray of shape (N, D)
+        - num_samples: number of points to sample
+        
+        Returns:
+        - indices: np.ndarray of shape (num_samples,) containing indices of sampled points
+        """
+        N = point_cloud.shape[0]
+        if num_samples >= N:
+            return np.arange(N)
+        
+        # Keep track of sampled indices
+        sampled_indices = np.zeros(num_samples, dtype=int)
+        
+        # Randomly select the first point
+        sampled_indices[0] = np.random.randint(N)
+        
+        # Compute distances to the first point
+        distances = np.linalg.norm(point_cloud - point_cloud[sampled_indices[0]], axis=1)
+        
+        # Iteratively select points
+        for i in range(1, num_samples):
+            # Find the point farthest from all currently sampled points
+            farthest_idx = np.argmax(distances)
+            sampled_indices[i] = farthest_idx
+            
+            # Update distances
+            new_distances = np.linalg.norm(point_cloud - point_cloud[farthest_idx], axis=1)
+            distances = np.minimum(distances, new_distances)
+        
+        return sampled_indices
     
     def create_plotly_visualization(self, datasets: Dict[str, Tuple[np.ndarray, np.ndarray]]) -> go.Figure:
         """Create interactive 3D visualization using Plotly."""
@@ -404,6 +516,12 @@ def main():
                        help='Save plots to files')
     parser.add_argument('--backend', choices=['matplotlib', 'plotly'], 
                        default='plotly', help='Visualization backend')
+    parser.add_argument('--fps', action='store_true',
+                       help='Enable FPS (Farthest Point Sampling) visualization')
+    parser.add_argument('--fps-samples', type=int, default=2000,
+                       help='Number of samples after FPS (default: 2000)')
+    parser.add_argument('--no-fps', action='store_true',
+                       help='Disable FPS visualization')
     
     args = parser.parse_args()
     
@@ -415,6 +533,12 @@ def main():
         visualizer.config['output']['save_plots'] = True
     if args.backend:
         visualizer.config['visualization']['backend'] = args.backend
+    if args.fps:
+        visualizer.config['fps']['enabled'] = True
+    if args.no_fps:
+        visualizer.config['fps']['enabled'] = False
+    if args.fps_samples:
+        visualizer.config['fps']['num_samples'] = args.fps_samples
     
     # Run visualization
     try:

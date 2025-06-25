@@ -13,7 +13,7 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 200 # Temporarily reduced for testin
+  epochs: 50 # Temporarily reduced for testin
   batch_size: 64    # Increased batch size for MPS
   learning_rate: 0.0015  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
@@ -75,7 +75,7 @@ data:
     big_radius: 3     # Radius of the larger circle of the torus
     small_radius: 1   # Radius of the smaller circle (tube) of the torus
     solid: true      # If true, generate solid tori; if false, hollow (surface-only) tori
-    interior_noise: 0 # Noise level for interior points when solid=true (0.05-0.2 recommended)
+    interior_noise: 0.01 # Noise level for interior points when solid=true (0.05-0.2 recommended)
 
   # Train/test split options
   split_ratio: 0.85     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)

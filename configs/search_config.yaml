@@ -32,7 +32,7 @@ sampling:
 grid_search:
   # K-Neighbors parameter range
   k_neighbors:
-    values: [15, 17, 20, 22, 25]                    # Reduced for quick testing
+    values: [10, 15, 20, 25, 30]                    # Reduced for quick testing
     # Alternative: use range specification
     # min: 3
     # max: 25

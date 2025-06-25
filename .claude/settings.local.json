@@ -24,7 +24,8 @@
       "WebFetch(domain:gudhi.inria.fr)",
       "Bash(/opt/anaconda3/envs/myenv/bin/python:*)",
       "Bash(./run_witness_test.sh:*)",
-      "Bash(time python:*)"
+      "Bash(time python:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": []
   },

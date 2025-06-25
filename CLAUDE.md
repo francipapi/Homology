@@ -35,6 +35,21 @@ pip install -r requirements.txt
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 ```
 
+**IMPORTANT: Always activate the conda environment before running any scripts:**
+
+Due to conda shell integration issues, use the direct path method:
+```bash
+# Use myenv Python directly
+/opt/anaconda3/envs/myenv/bin/python script_name.py
+
+# Or if conda activation works in your shell:
+conda activate myenv
+python script_name.py
+```
+
+All Python scripts in this repository must be run within the `myenv` conda environment.
+The myenv Python path is: `/opt/anaconda3/envs/myenv/bin/python`
+
 ## Architecture Overview
 
 ### Core Pipeline Flow

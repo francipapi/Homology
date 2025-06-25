@@ -743,27 +743,45 @@ def _print_betti_summary(all_betti_results: Dict):
         # Print header
         print(f"  Networks: {num_networks}, Layers: {num_layers}")
         print("\n  Layer-wise Betti numbers:")
-        print("  " + "-" * 36)
-        print("  Layer | B0 (components) | B1 (loops) | B2 (voids)")
-        print("  " + "-" * 36)
+        
+        # Create dynamic header based on actual dimensions
+        header_parts = ["Layer"]
+        dim_names = ["B0 (components)", "B1 (loops)", "B2 (voids)", "B3 (3-cavities)"]
+        for dim in range(num_dims):
+            header_parts.append(dim_names[dim] if dim < len(dim_names) else f"B{dim}")
+        
+        # Print header with appropriate spacing
+        header_line = "  " + " | ".join(f"{part:^15}" for part in header_parts)
+        separator = "  " + "-" * (len(header_line) - 2)
+        print(separator)
+        print(header_line)
+        print(separator)
         
         # Print average Betti numbers per layer across all networks
         for layer_idx in range(num_layers):
             avg_bettis = np.mean(betti_tensor[:, layer_idx, :], axis=0)
             std_bettis = np.std(betti_tensor[:, layer_idx, :], axis=0)
             
-            print(f"  {layer_idx:5d} | {avg_bettis[0]:15.1f} | {avg_bettis[1]:10.1f} | {avg_bettis[2]:10.1f}")
+            # Build the line dynamically based on available dimensions
+            line_parts = [f"{layer_idx:5d}"]
+            for dim in range(num_dims):
+                line_parts.append(f"{avg_bettis[dim]:15.1f}")
+            print("  " + " | ".join(line_parts))
             
             # If there's variation across networks, show it
             if num_networks > 1 and np.any(std_bettis > 0.1):
-                print(f"        | (±{std_bettis[0]:13.1f}) | (±{std_bettis[1]:8.1f}) | (±{std_bettis[2]:8.1f})")
+                std_parts = ["     "]  # Empty space for layer column
+                for dim in range(num_dims):
+                    std_parts.append(f"(±{std_bettis[dim]:13.1f})")
+                print("  " + " | ".join(std_parts))
         
-        print("  " + "-" * 36)
+        print(separator)
         
         # Print overall statistics
         print("\n  Overall statistics:")
+        dim_names_full = ["H0 (components)", "H1 (loops)", "H2 (voids)", "H3 (3-cavities)"]
         for dim in range(num_dims):
-            dim_name = ["H0 (components)", "H1 (loops)", "H2 (voids)"][dim]
+            dim_name = dim_names_full[dim] if dim < len(dim_names_full) else f"H{dim}"
             all_values = betti_tensor[:, :, dim].flatten()
             print(f"    {dim_name}:")
             print(f"      Range: [{all_values.min()}, {all_values.max()}]")
