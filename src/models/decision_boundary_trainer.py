@@ -142,13 +142,27 @@ class DecisionBoundaryExtractor:
         model.eval()
         predictions = []
         
+        # Optimize batch size based on available memory
+        performance_config = self.config.get('performance', {})
+        memory_config = performance_config.get('memory', {})
+        if memory_config.get('batch_processing', True):
+            batch_size = memory_config.get('batch_size', batch_size)
+        
         with torch.no_grad():
+            # Use half precision if available and device supports it
+            use_amp = device.type == 'cuda' and torch.cuda.is_available()
+            
             for i in range(0, len(grid_points), batch_size):
                 batch = grid_points[i:i+batch_size]
                 batch_tensor = torch.FloatTensor(batch).to(device)
                 
-                # Get predictions
-                batch_preds = model(batch_tensor)
+                # Get predictions with optional mixed precision
+                if use_amp:
+                    with torch.cuda.amp.autocast():
+                        batch_preds = model(batch_tensor)
+                else:
+                    batch_preds = model(batch_tensor)
+                    
                 if batch_preds.dim() > 1:
                     batch_preds = batch_preds.squeeze()
                     
@@ -156,8 +170,8 @@ class DecisionBoundaryExtractor:
                 
                 # Memory cleanup
                 del batch_tensor, batch_preds
-                if i % (batch_size * 10) == 0:
-                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                if device.type == 'cuda' and i % (batch_size * 10) == 0:
+                    torch.cuda.empty_cache()
         
         return np.concatenate(predictions, axis=0)
     
@@ -208,6 +222,24 @@ class DecisionBoundaryExtractor:
             vertices[:, 0] = vertices[:, 0] * scale_x + bounds['x_min']
             vertices[:, 1] = vertices[:, 1] * scale_y + bounds['y_min']
             vertices[:, 2] = vertices[:, 2] * scale_z + bounds['z_min']
+            
+            # Apply mesh decimation if configured and trimesh is available
+            decimate_factor = self.extraction_config.get('isosurface', {}).get('decimate', 0)
+            if decimate_factor > 0 and decimate_factor < 1 and TRIMESH_AVAILABLE:
+                try:
+                    # Create trimesh object
+                    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+                    
+                    # Simplify mesh - the method expects a reduction factor between 0 and 1
+                    # where 0.1 means reduce TO 10% of original (90% reduction)
+                    # but our config uses 0.1 to mean reduce BY 10% (keep 90%)
+                    target_reduction = 1 - decimate_factor  # Convert to "keep" factor
+                    simplified = mesh.simplify_quadric_decimation(face_count=int(len(faces) * target_reduction))
+                    print(f"Decimated mesh: {len(faces)} → {len(simplified.faces)} faces ({decimate_factor*100:.1f}% reduction)")
+                    vertices = simplified.vertices
+                    faces = simplified.faces
+                except Exception as e:
+                    print(f"Warning: Mesh decimation failed: {e}")
             
             return vertices, faces
             
@@ -561,14 +593,22 @@ class DecisionBoundaryTrainer:
                 # Create trimesh object and save
                 if TRIMESH_AVAILABLE:
                     mesh = trimesh.Trimesh(vertices=result.mesh_vertices, faces=result.mesh_faces)
-                    mesh.export(str(mesh_file))
+                    
+                    # Remove duplicate and degenerate faces for efficiency
+                    mesh.update_faces(mesh.unique_faces())
+                    mesh.update_faces(mesh.nondegenerate_faces())
+                    
+                    # Export with binary format for smaller file size
+                    mesh.export(str(mesh_file), file_type='ply', encoding='binary')
+                    
+                    # Print mesh statistics
+                    print(f"Saved boundary mesh: {mesh_file} ({len(mesh.vertices):,} vertices, {len(mesh.faces):,} faces)")
                 else:
-                    # Fallback: save as numpy arrays
-                    np.savez(str(mesh_file).replace('.ply', '.npz'),
-                           vertices=result.mesh_vertices,
-                           faces=result.mesh_faces)
-                
-                print(f"Saved boundary mesh: {mesh_file}")
+                    # Fallback: save as compressed numpy arrays
+                    np.savez_compressed(str(mesh_file).replace('.ply', '.npz'),
+                                      vertices=result.mesh_vertices,
+                                      faces=result.mesh_faces)
+                    print(f"Saved boundary mesh (npz): {mesh_file}")
         except Exception as e:
             print(f"Error saving boundary mesh: {e}")
     
@@ -778,6 +818,10 @@ class DecisionBoundaryTrainer:
             'boundary_results': self.boundary_results,
             'layer_outputs': self.layer_outputs,
             'final_model_state': model.state_dict(),
+            'dataset': {
+                'X': X_full.cpu().numpy(),
+                'y': y_full.cpu().numpy()
+            },
             'config': {
                 'training': self.training_config,
                 'boundary': self.boundary_config

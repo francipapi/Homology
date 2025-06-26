@@ -49,7 +49,7 @@ except ImportError:
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # Import boundary extraction results
-from src.topology.decision_boundary_homology import BoundaryExtractionResult, load_boundary_config
+from src.models.decision_boundary_trainer import BoundaryExtractionResult, load_boundary_config
 
 
 @dataclass
@@ -76,6 +76,7 @@ class DecisionBoundaryVisualizer:
     3. Training evolution animations
     4. Architecture comparison plots
     5. Topology analysis overlays
+    6. Dataset overlay visualization
     """
     
     def __init__(self, config: Optional[Dict] = None):
@@ -91,6 +92,7 @@ class DecisionBoundaryVisualizer:
         # Storage for visualization data
         self.boundary_data = []  # List of BoundaryExtractionResult objects
         self.training_data = {}  # Training metrics
+        self.dataset = None  # Training dataset (X, y)
         self.color_schemes = self._setup_color_schemes()
         
     def _parse_viz_config(self) -> VisualizationConfig:
@@ -168,9 +170,12 @@ class DecisionBoundaryVisualizer:
                 print(f"Directory not found: {directory}")
                 return
             
-            # Load topology files
-            topology_files = sorted(boundary_dir.glob("topology_epoch_*.pt"))
-            mesh_files = sorted(boundary_dir.glob("boundary_epoch_*.ply"))
+            # Load topology files from subdirectories
+            topology_dir = boundary_dir / "topology"
+            boundaries_dir = boundary_dir / "boundaries"
+            
+            topology_files = sorted(topology_dir.glob("topology_epoch_*.pt")) if topology_dir.exists() else []
+            mesh_files = sorted(boundaries_dir.glob("boundary_epoch_*.ply")) if boundaries_dir.exists() else []
             
             self.boundary_data = []
             
@@ -182,16 +187,14 @@ class DecisionBoundaryVisualizer:
                     result = BoundaryExtractionResult(
                         epoch=topo_data['epoch'],
                         boundary_points=topo_data.get('boundary_points'),
-                        betti_numbers=topo_data.get('betti_numbers'),
                         extraction_time=topo_data.get('extraction_time', 0),
-                        topology_time=topo_data.get('topology_time', 0),
                         success=True,
                         metadata=topo_data.get('metadata')
                     )
                     
                     # Try to load corresponding mesh
                     epoch = topo_data['epoch']
-                    mesh_file = boundary_dir / f"boundary_epoch_{epoch:04d}.ply"
+                    mesh_file = boundaries_dir / f"boundary_epoch_{epoch:04d}.ply"
                     if mesh_file.exists() and TRIMESH_AVAILABLE:
                         try:
                             mesh = trimesh.load(str(mesh_file))
@@ -210,19 +213,128 @@ class DecisionBoundaryVisualizer:
         except Exception as e:
             print(f"Error loading from directory: {e}")
     
-    def create_single_boundary_plot(self, result: BoundaryExtractionResult, 
-                                   title: Optional[str] = None) -> go.Figure:
+    def load_or_generate_dataset(self, config_path: Optional[str] = None) -> None:
         """
-        Create a 3D plot for a single decision boundary.
+        Load or generate the training dataset based on config.
+        
+        Parameters:
+        - config_path: Path to training config (optional)
+        """
+        try:
+            # Try to load from training results first
+            results_path = Path('results/decision_boundary_analysis/analysis/complete_training_results.pt')
+            if results_path.exists():
+                try:
+                    # Import the dataclass to load the file
+                    from src.models.decision_boundary_trainer import BoundaryExtractionResult
+                    data = torch.load(results_path, map_location='cpu')
+                    if 'dataset' in data:
+                        self.dataset = (data['dataset']['X'], data['dataset']['y'])
+                        print(f"Loaded dataset from training results: {self.dataset[0].shape}")
+                        return
+                except Exception as e:
+                    print(f"Could not load dataset from results: {e}")
+            
+            # Otherwise, generate dataset from config
+            if config_path is None:
+                config_path = 'configs/training_config.yaml'
+            
+            with open(config_path, 'r') as f:
+                training_config = yaml.safe_load(f)
+            
+            data_config = training_config.get('data', {})
+            
+            # Import dataset generation functions
+            from src.models.torch_mlp import generate_torus_data
+            
+            # Generate dataset based on config
+            gen_config = data_config.get('generation', {})
+            num_samples = gen_config.get('n', 1000)
+            big_radius = gen_config.get('big_radius', 3)
+            small_radius = gen_config.get('small_radius', 1)
+            solid = gen_config.get('solid', False)
+            interior_noise = gen_config.get('interior_noise', 0.1)
+            
+            X, y = generate_torus_data(num_samples, big_radius, small_radius, solid, interior_noise)
+            self.dataset = (X.numpy(), y.numpy())
+            
+            print(f"Generated dataset: {self.dataset[0].shape} samples")
+            
+        except Exception as e:
+            print(f"Error loading/generating dataset: {e}")
+            self.dataset = None
+    
+    def create_single_boundary_plot(self, result: BoundaryExtractionResult, 
+                                   title: Optional[str] = None,
+                                   show_dataset: bool = True) -> go.Figure:
+        """
+        Create a 3D plot for a single decision boundary with optional dataset overlay.
         
         Parameters:
         - result: BoundaryExtractionResult object
         - title: Plot title
+        - show_dataset: Whether to show the training dataset points
         
         Returns:
         - fig: Plotly figure object
         """
         fig = go.Figure()
+        
+        # Add dataset points if available and requested
+        if show_dataset and self.dataset is not None:
+            X, y = self.dataset
+            
+            # Ensure X is the right shape and flatten y if needed
+            if len(X.shape) == 2 and X.shape[1] == 3:
+                if len(y.shape) > 1:
+                    y = y.flatten()
+                # Add points for class 0 (inside torus)
+                mask_0 = y == 0
+                if np.any(mask_0):
+                    fig.add_trace(go.Scatter3d(
+                        x=X[mask_0, 0],
+                        y=X[mask_0, 1],
+                        z=X[mask_0, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=4,
+                            color='dodgerblue',
+                            opacity=0.8,
+                            line=dict(width=0.5, color='darkblue')
+                        ),
+                        name=f'Class 0 (Inside, n={np.sum(mask_0):,})',
+                        hovertemplate='<b>Training Point (Class 0)</b><br>' +
+                                     'X: %{x:.2f}<br>' +
+                                     'Y: %{y:.2f}<br>' +
+                                     'Z: %{z:.2f}<br>' +
+                                     '<extra></extra>',
+                        legendgroup='dataset',
+                        showlegend=True
+                    ))
+                
+                # Add points for class 1 (outside torus)
+                mask_1 = y == 1
+                if np.any(mask_1):
+                    fig.add_trace(go.Scatter3d(
+                        x=X[mask_1, 0],
+                        y=X[mask_1, 1],
+                        z=X[mask_1, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=4,
+                            color='crimson',
+                            opacity=0.8,
+                            line=dict(width=0.5, color='darkred')
+                        ),
+                        name=f'Class 1 (Outside, n={np.sum(mask_1):,})',
+                        hovertemplate='<b>Training Point (Class 1)</b><br>' +
+                                     'X: %{x:.2f}<br>' +
+                                     'Y: %{y:.2f}<br>' +
+                                     'Z: %{z:.2f}<br>' +
+                                     '<extra></extra>',
+                        legendgroup='dataset',
+                        showlegend=True
+                    ))
         
         # Add mesh if available
         if (self.viz_config.show_mesh and result.mesh_vertices is not None 
@@ -235,17 +347,24 @@ class DecisionBoundaryVisualizer:
                 i=result.mesh_faces[:, 0],
                 j=result.mesh_faces[:, 1],
                 k=result.mesh_faces[:, 2],
-                opacity=self.viz_config.opacity,
+                opacity=max(0.3, self.viz_config.opacity - 0.2),
                 colorscale=self.viz_config.color_scheme,
-                name=f'Decision Boundary (Epoch {result.epoch})',
-                showscale=False
+                name=f'Decision Boundary Surface (Epoch {result.epoch})',
+                showscale=False,
+                hovertemplate='<b>Decision Boundary</b><br>' +
+                             'X: %{x:.2f}<br>' +
+                             'Y: %{y:.2f}<br>' +
+                             'Z: %{z:.2f}<br>' +
+                             '<extra></extra>',
+                legendgroup='boundary',
+                showlegend=True
             ))
         
         # Add point cloud if available
         if (self.viz_config.show_points and result.boundary_points is not None):
             
             # Color points by distance from origin (or topology if available)
-            if result.betti_numbers is not None:
+            if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
                 # Color by topology complexity
                 topology_complexity = sum(result.betti_numbers)
                 colors = [topology_complexity] * len(result.boundary_points)
@@ -262,41 +381,93 @@ class DecisionBoundaryVisualizer:
                 z=result.boundary_points[:, 2],
                 mode='markers',
                 marker=dict(
-                    size=self.viz_config.point_size,
+                    size=max(2, self.viz_config.point_size - 1),
                     color=colors,
                     colorscale=self.viz_config.color_scheme,
-                    colorbar=dict(title=colorbar_title),
-                    opacity=0.8
+                    colorbar=dict(
+                        title=colorbar_title,
+                        titleside='right',
+                        tickmode='linear',
+                        tick0=0,
+                        dtick=2
+                    ),
+                    opacity=0.6,
+                    line=dict(width=0.2, color='rgba(100,100,100,0.3)')
                 ),
-                name=f'Boundary Points (Epoch {result.epoch})'
+                name=f'Boundary Points (n={len(result.boundary_points):,})',
+                hovertemplate='<b>Boundary Point</b><br>' +
+                             'X: %{x:.2f}<br>' +
+                             'Y: %{y:.2f}<br>' +
+                             'Z: %{z:.2f}<br>' +
+                             f'{colorbar_title}: %{{marker.color:.2f}}<br>' +
+                             '<extra></extra>',
+                legendgroup='points',
+                showlegend=True
             ))
         
         # Update layout
         plot_title = title or f'Decision Boundary - Epoch {result.epoch}'
-        if result.betti_numbers is not None:
+        if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
             betti_str = ', '.join([f'β{i}={b}' for i, b in enumerate(result.betti_numbers)])
             plot_title += f' | Betti: [{betti_str}]'
         
         fig.update_layout(
-            title=plot_title,
-            scene=dict(
-                xaxis_title="X",
-                yaxis_title="Y",
-                zaxis_title="Z",
-                aspectmode='cube'
+            title=dict(
+                text=plot_title,
+                font=dict(size=20),
+                x=0.5,
+                xanchor='center'
             ),
-            margin=dict(l=0, r=0, t=50, b=0),
-            height=600
+            scene=dict(
+                xaxis=dict(
+                    title="X Coordinate",
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)",
+                    showgrid=True
+                ),
+                yaxis=dict(
+                    title="Y Coordinate",
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)",
+                    showgrid=True
+                ),
+                zaxis=dict(
+                    title="Z Coordinate",
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)",
+                    showgrid=True
+                ),
+                aspectmode='cube',
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.5)
+                )
+            ),
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01,
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="rgba(0, 0, 0, 0.2)",
+                borderwidth=1
+            ),
+            margin=dict(l=0, r=0, t=60, b=0),
+            height=700
         )
         
         return fig
     
-    def create_evolution_animation(self, output_path: Optional[str] = None) -> go.Figure:
+    def create_evolution_animation(self, output_path: Optional[str] = None, 
+                                  show_dataset: bool = True) -> go.Figure:
         """
         Create an animation showing decision boundary evolution during training.
         
         Parameters:
         - output_path: Path to save animation (optional)
+        - show_dataset: Whether to show the training dataset points
         
         Returns:
         - fig: Plotly figure with animation
@@ -308,11 +479,58 @@ class DecisionBoundaryVisualizer:
         # Sort by epoch
         sorted_data = sorted(self.boundary_data, key=lambda x: x.epoch)
         
+        # Add dataset traces if available
+        dataset_traces = []
+        if show_dataset and self.dataset is not None:
+            X, y = self.dataset
+            
+            # Ensure X is the right shape and flatten y if needed
+            if len(X.shape) == 2 and X.shape[1] == 3:
+                if len(y.shape) > 1:
+                    y = y.flatten()
+                # Add class 0 points
+                mask_0 = y == 0
+                if np.any(mask_0):
+                    dataset_traces.append(go.Scatter3d(
+                        x=X[mask_0, 0],
+                        y=X[mask_0, 1],
+                        z=X[mask_0, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=3,
+                            color='dodgerblue',
+                            opacity=0.7,
+                            line=dict(width=0.3, color='darkblue')
+                        ),
+                        name=f'Class 0 (n={np.sum(mask_0):,})',
+                        legendgroup='dataset',
+                        showlegend=True
+                    ))
+                
+                # Add class 1 points
+                mask_1 = y == 1
+                if np.any(mask_1):
+                    dataset_traces.append(go.Scatter3d(
+                        x=X[mask_1, 0],
+                        y=X[mask_1, 1],
+                        z=X[mask_1, 2],
+                        mode='markers',
+                        marker=dict(
+                            size=3,
+                            color='crimson',
+                            opacity=0.7,
+                            line=dict(width=0.3, color='darkred')
+                        ),
+                        name=f'Class 1 (n={np.sum(mask_1):,})',
+                        legendgroup='dataset',
+                        showlegend=True
+                    ))
+        
         # Create animation frames
         frames = []
         
         for i, result in enumerate(sorted_data):
-            frame_data = []
+            frame_data = dataset_traces.copy()  # Start with dataset
             
             # Add mesh trace if available
             if (self.viz_config.show_mesh and result.mesh_vertices is not None 
@@ -325,10 +543,15 @@ class DecisionBoundaryVisualizer:
                     i=result.mesh_faces[:, 0],
                     j=result.mesh_faces[:, 1],
                     k=result.mesh_faces[:, 2],
-                    opacity=self.viz_config.opacity,
+                    opacity=max(0.3, self.viz_config.opacity - 0.2),
                     colorscale=self.viz_config.color_scheme,
-                    name=f'Boundary Mesh',
-                    showscale=False
+                    name='Decision Boundary Surface',
+                    showscale=False,
+                    hovertemplate='<b>Boundary Surface</b><br>' +
+                                 'Epoch: %{text}<br>' +
+                                 '<extra></extra>',
+                    text=[str(result.epoch)] * len(result.mesh_vertices),
+                    showlegend=True if i == 0 else False
                 ))
             
             # Add point cloud trace if available
@@ -342,17 +565,27 @@ class DecisionBoundaryVisualizer:
                     z=result.boundary_points[:, 2],
                     mode='markers',
                     marker=dict(
-                        size=self.viz_config.point_size,
+                        size=max(1, self.viz_config.point_size - 1),
                         color=distances,
                         colorscale=self.viz_config.color_scheme,
-                        opacity=0.8
+                        colorbar=dict(
+                            title="Distance from Origin",
+                            titleside='right'
+                        ) if i == 0 else None,
+                        showscale=True if i == 0 else False,
+                        opacity=0.5,
+                        line=dict(width=0.1, color='rgba(80,80,80,0.2)')
                     ),
-                    name='Boundary Points'
+                    name=f'Boundary Points (n={len(result.boundary_points):,})',
+                    hovertemplate='<b>Point</b><br>' +
+                                 'Distance: %{marker.color:.2f}<br>' +
+                                 '<extra></extra>',
+                    showlegend=True if i == 0 else False
                 ))
             
             # Create frame title
             frame_title = f'Epoch {result.epoch}'
-            if result.betti_numbers is not None:
+            if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
                 betti_str = ', '.join([f'β{i}={b}' for i, b in enumerate(result.betti_numbers)])
                 frame_title += f' | Betti: [{betti_str}]'
             
@@ -363,19 +596,58 @@ class DecisionBoundaryVisualizer:
             ))
         
         # Create initial figure with first frame
+        initial_data = dataset_traces.copy() if dataset_traces else []
+        if frames:
+            # Add boundary data from first frame (excluding dataset traces)
+            for trace in frames[0].data:
+                if trace not in dataset_traces:
+                    initial_data.append(trace)
+        
         fig = go.Figure(
-            data=frames[0].data if frames else [],
+            data=initial_data,
             frames=frames
         )
         
         # Add animation controls
         fig.update_layout(
-            title='Decision Boundary Evolution During Training',
+            title=dict(
+                text='Decision Boundary Evolution During Training',
+                font=dict(size=22),
+                x=0.5,
+                xanchor='center'
+            ),
             scene=dict(
-                xaxis_title="X",
-                yaxis_title="Y", 
-                zaxis_title="Z",
-                aspectmode='cube'
+                xaxis=dict(
+                    title="X Coordinate",
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)"
+                ),
+                yaxis=dict(
+                    title="Y Coordinate", 
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)"
+                ),
+                zaxis=dict(
+                    title="Z Coordinate",
+                    showbackground=True,
+                    backgroundcolor="rgb(240, 240, 240)",
+                    gridcolor="rgb(200, 200, 200)"
+                ),
+                aspectmode='cube',
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.5)
+                )
+            ),
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01,
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="rgba(0, 0, 0, 0.2)",
+                borderwidth=1
             ),
             updatemenus=[{
                 'type': 'buttons',
@@ -463,7 +735,7 @@ class DecisionBoundaryVisualizer:
         betti_data = {}
         
         for result in self.boundary_data:
-            if result.betti_numbers is not None:
+            if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
                 epochs.append(result.epoch)
                 
                 for i, betti in enumerate(result.betti_numbers):
@@ -498,16 +770,39 @@ class DecisionBoundaryVisualizer:
             ))
         
         fig.update_layout(
-            title='Decision Boundary Topology Evolution',
-            xaxis_title='Training Epoch',
-            yaxis_title='Betti Number',
+            title=dict(
+                text='Decision Boundary Topology Evolution',
+                font=dict(size=20),
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                title='Training Epoch',
+                showgrid=True,
+                gridcolor='rgb(200, 200, 200)',
+                zeroline=True,
+                zerolinecolor='rgb(100, 100, 100)'
+            ),
+            yaxis=dict(
+                title='Betti Number Value',
+                showgrid=True,
+                gridcolor='rgb(200, 200, 200)',
+                zeroline=True,
+                zerolinecolor='rgb(100, 100, 100)'
+            ),
             hovermode='x unified',
             legend=dict(
+                title=dict(text='Topological Features', font=dict(size=14)),
                 yanchor="top",
                 y=0.99,
                 xanchor="left",
-                x=0.01
-            )
+                x=0.01,
+                bgcolor="rgba(255, 255, 255, 0.9)",
+                bordercolor="rgba(0, 0, 0, 0.2)",
+                borderwidth=1
+            ),
+            plot_bgcolor='rgba(250, 250, 250, 0.9)',
+            height=600
         )
         
         return fig
@@ -624,7 +919,7 @@ class DecisionBoundaryVisualizer:
         betti_data = {}
         
         for result in self.boundary_data:
-            if result.betti_numbers is not None:
+            if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
                 epochs.append(result.epoch)
                 
                 for i, betti in enumerate(result.betti_numbers):
@@ -686,7 +981,7 @@ class DecisionBoundaryVisualizer:
                     if result.mesh_vertices is not None:
                         np_data[f'{prefix}_vertices'] = result.mesh_vertices
                         np_data[f'{prefix}_faces'] = result.mesh_faces
-                    if result.betti_numbers is not None:
+                    if hasattr(result, 'betti_numbers') and result.betti_numbers is not None:
                         np_data[f'{prefix}_betti'] = np.array(result.betti_numbers)
                 
                 np.savez_compressed(output_path, **np_data)

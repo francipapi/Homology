@@ -20,15 +20,15 @@ training:
 extraction:
   # Spatial sampling grid for boundary detection
   grid:
-    resolution: [64, 64, 64]         # Grid resolution [x, y, z]
+    resolution: [100, 100, 100]         # Grid resolution [x, y, z]
     bounds: null                     # Auto-detect from training data if null
     custom_bounds:                   # Custom bounds if not auto-detected
-      x_min: -6.0
-      x_max: 6.0
-      y_min: -6.0
-      y_max: 6.0
-      z_min: -6.0
-      z_max: 6.0
+      x_min: -20.0
+      x_max: 20.0
+      y_min: -20.0
+      y_max: 20.0
+      z_min: -20.0
+      z_max: 20.0
   
   # Decision boundary detection
   boundary_detection:
@@ -41,13 +41,13 @@ extraction:
     enabled: true                    # Enable isosurface extraction
     level: 0.5                       # Isosurface level (decision threshold)
     smoothing: 0                     # Gaussian smoothing sigma (0 = no smoothing)
-    decimate: 0.1                    # Mesh decimation factor (0 = no decimation)
+    decimate: 0.1                    # Mesh decimation factor (0.1 = reduce by 10%, keep 90% of faces)
     
   # Point cloud sampling near boundary
   point_sampling:
     enabled: true                    # Enable point cloud sampling
-    method: 'adaptive'               # 'uniform', 'adaptive', 'random'
-    num_points: 5000                 # Target number of boundary points
+    method: 'uniform'               # 'uniform', 'adaptive', 'random'
+    num_points: 100000                 # Target number of boundary points
     adaptive_refinement: true        # Refine sampling in complex regions
     
 # Topology Computation Settings
@@ -56,13 +56,13 @@ topology:
   computation:
     enabled: false                   # Disable during training - compute separately with compute_boundary_homology.py
     max_dimension: 2                 # Maximum homology dimension
-    max_edge_length: 1.0             # Maximum edge length for Rips complex
+    max_edge_length: 3.0             # Maximum edge length for Rips complex
     normalize_data: true             # Normalize point cloud before computation
     
   # Sampling for topology computation
   sampling:
     method: 'fps'                    # 'fps' (farthest point), 'random', 'grid'
-    num_points: 2000                 # Points for topology computation
+    num_points: 10000                 # Points for topology computation
     min_points_threshold: 100        # Minimum points required
     
   # Persistence computation
