@@ -232,7 +232,39 @@ def train_single_network(args):
             print(f"WARNING: Network {network_id} - Failed to extract layer outputs: {e}")
             layer_outputs_path = None
 
-    return network_id, final_loss, final_acc, layer_outputs_path, training_time, model_saved
+    # Extract train/test activations separately if enabled
+    train_test_layer_paths = None
+    if le_cfg.get('train_test_layer_extraction', False):
+        try:
+            train_test_layer_paths = {}
+            temp_dir = Path(tempfile.gettempdir()) / 'torch_parallel_train_test_layers'
+            temp_dir.mkdir(exist_ok=True)
+            
+            # Extract train dataset activations
+            train_loader_extract = DataLoader(train_dataset,
+                                            batch_size=training_config['batch_size'],
+                                            shuffle=False,
+                                            num_workers=0)
+            train_lo_tensor = model.extract_layer_outputs(train_loader_extract, device)
+            train_path = temp_dir / f'network_{network_id}_train_layer_outputs.pt'
+            torch.save(train_lo_tensor.cpu(), train_path)
+            train_test_layer_paths['train'] = train_path
+            
+            # Extract test dataset activations
+            test_loader_extract = DataLoader(test_dataset,
+                                           batch_size=training_config['batch_size'],
+                                           shuffle=False,
+                                           num_workers=0)
+            test_lo_tensor = model.extract_layer_outputs(test_loader_extract, device)
+            test_path = temp_dir / f'network_{network_id}_test_layer_outputs.pt'
+            torch.save(test_lo_tensor.cpu(), test_path)
+            train_test_layer_paths['test'] = test_path
+            
+        except Exception as e:
+            print(f"WARNING: Network {network_id} - Failed to extract train/test layer outputs: {e}")
+            train_test_layer_paths = None
+
+    return network_id, final_loss, final_acc, layer_outputs_path, training_time, model_saved, train_test_layer_paths
 
 
 class ParallelTrainer:
@@ -335,12 +367,15 @@ class ParallelTrainer:
                 try:
                     res = future.result()
                     results.append(res)
-                    _, loss, acc, _, ttime, saved = res
+                    if len(res) == 7:  # New format with train_test_layer_paths
+                        _, loss, acc, _, ttime, saved, _ = res
+                    else:  # Old format for backward compatibility
+                        _, loss, acc, _, ttime, saved = res
                     saved_str = ' [Model Saved]' if saved else ' [Model Not Saved]'
                     print(f"Network {nid:2d}: Loss={loss:.4f}, Accuracy={acc:.4f}, Time={ttime:.2f}s{saved_str}")
                 except Exception as exc:
                     print(f"ERROR: Network {nid} failed with exception: {exc}")
-                    results.append((nid, float('nan'), float('nan'), None, 0.0, False))
+                    results.append((nid, float('nan'), float('nan'), None, 0.0, False, None))
 
         total_time = time.time() - start_time
         results.sort(key=lambda x: x[0])
@@ -374,6 +409,10 @@ class ParallelTrainer:
 
         if self.config.get('layer_extraction', {}).get('enabled', False):
             self.save_layer_outputs(results)
+        
+        if self.config.get('layer_extraction', {}).get('train_test_layer_extraction', False):
+            self.save_train_test_layer_outputs(results)
+        
         return results
 
     def save_layer_outputs(self, results):
@@ -449,6 +488,92 @@ class ParallelTrainer:
             if temp_dir.exists() and not any(temp_dir.iterdir()):
                 temp_dir.rmdir()
                 print("Cleaned up temporary directory.")
+        except:
+            pass  # Ignore cleanup errors
+    
+    def save_train_test_layer_outputs(self, results):
+        print("\nTRAIN/TEST LAYER OUTPUTS PROCESSING:")
+        print("-" * 40)
+        
+        # Extract train/test layer paths from results (7th element if present)
+        train_test_paths = []
+        for r in results:
+            if len(r) >= 7 and r[6] is not None:
+                train_test_paths.append((r[0], r[6]))  # (network_id, paths_dict)
+        
+        if not train_test_paths:
+            print("No train/test layer outputs available for saving.")
+            return
+        
+        print(f"Loading train/test layer outputs from {len(train_test_paths)} networks...")
+        
+        # Process train and test outputs separately
+        for dataset_type in ['train', 'test']:
+            all_layer_outputs = []
+            failed_loads = 0
+            
+            for network_id, paths_dict in train_test_paths:
+                path = paths_dict.get(dataset_type)
+                if path is None:
+                    continue
+                    
+                try:
+                    layer_output = torch.load(path, map_location='cpu')
+                    all_layer_outputs.append(layer_output)
+                    print(f"  Network {network_id} ({dataset_type}): Loaded layer outputs with shape {layer_output.shape}")
+                    # Clean up temporary file
+                    os.remove(path)
+                except Exception as e:
+                    print(f"  ERROR: Could not load {dataset_type} layer outputs for network {network_id}: {e}")
+                    failed_loads += 1
+                    continue
+            
+            if not all_layer_outputs:
+                print(f"ERROR: No valid {dataset_type} layer outputs found after loading.")
+                continue
+            
+            if failed_loads > 0:
+                print(f"WARNING: Failed to load {dataset_type} layer outputs from {failed_loads} networks.")
+            
+            # Stack all layer outputs
+            print(f"Stacking {dataset_type} layer outputs...")
+            try:
+                # Each layer output has shape [1, num_layers, dataset_size, width]
+                squeezed_outputs = [layer_output.squeeze(0) for layer_output in all_layer_outputs]
+                stacked_outputs = torch.stack(squeezed_outputs, dim=0)
+                print(f"Successfully stacked {len(all_layer_outputs)} {dataset_type} layer output tensors.")
+                print(f"Final stacked shape: {stacked_outputs.shape}")
+            except Exception as e:
+                print(f"ERROR: Failed to stack {dataset_type} layer outputs: {e}")
+                continue
+            
+            # Save stacked outputs
+            output_dir = Path(self.config['layer_extraction'].get('train_test_output_dir', 'results/train_test_layer_outputs'))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f'torch_parallel_{dataset_type}_layer_outputs.pt'
+            
+            print(f"Saving {dataset_type} layer outputs to file...")
+            try:
+                torch.save({
+                    'layer_outputs': stacked_outputs,
+                    'dataset_type': dataset_type,
+                    'config': self.config,
+                    'num_networks': len(all_layer_outputs)
+                }, output_file)
+                
+                print(f"SUCCESS: {dataset_type.capitalize()} layer outputs saved to: {output_file}")
+                print(f"Final tensor shape: {stacked_outputs.shape}")
+                print(f"Memory usage: {stacked_outputs.numel() * stacked_outputs.element_size() / 1024**2:.1f} MB")
+                
+            except Exception as e:
+                print(f"ERROR: Failed to save {dataset_type} layer outputs: {e}")
+        
+        # Clean up temporary directory if empty
+        temp_dir = Path(tempfile.gettempdir()) / 'torch_parallel_train_test_layers'
+        try:
+            if temp_dir.exists() and not any(temp_dir.iterdir()):
+                temp_dir.rmdir()
+                print("Cleaned up train/test temporary directory.")
         except:
             pass  # Ignore cleanup errors
 

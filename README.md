@@ -1,105 +1,339 @@
 # Neural Network Topological Analysis
 
-This project analyzes the topological properties of neural networks during training by computing persistent homology on the activations of different layers. The pipeline consists of several key components:
+This project analyzes the topological properties of neural networks during training by computing persistent homology on layer activations and decision boundaries. The framework provides a comprehensive pipeline for understanding how neural networks learn through the lens of algebraic topology.
+
+## Table of Contents
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Pipeline Description](#pipeline-description)
+- [Configuration](#configuration)
+- [Advanced Features](#advanced-features)
+- [Results and Visualization](#results-and-visualization)
+- [Testing](#testing)
+
+## Overview
+
+The project combines machine learning with topological data analysis (TDA) to:
+- Track topological changes in neural network activations during training
+- Analyze decision boundary evolution and complexity
+- Compute persistent homology to quantify topological features
+- Visualize Betti curves showing topological invariants across layers
+- Support multiple training backends (PyTorch, MLX for Apple Silicon)
+- Enable parallel and vectorized training for efficiency
 
 ## Project Structure
 
-### Data Generation and Processing
-- `data.py`: Contains functions for generating synthetic datasets (torus pairs) and data processing utilities
-  - `generate()`: Creates complex torus pair datasets
-  - `gen_easy()`: Creates simple torus pair datasets
-  - `farthest_point_sampling()`: Implements FPS for point cloud sampling
-  - `plot_torus_points()`: Visualizes 3D point clouds
+```
+Homology/
+├── main.py                 # Main pipeline orchestrator
+├── configs/               # Configuration files
+│   ├── training_config.yaml
+│   ├── homology_config.yaml
+│   ├── visualization_config.yaml
+│   └── decision_boundary_config.yaml
+├── src/
+│   ├── data/             # Data generation and processing
+│   ├── models/           # Neural network implementations
+│   ├── topology/         # Persistent homology computation
+│   ├── visualization/    # Plotting and visualization tools
+│   ├── utils/           # Utility functions
+│   └── analysis/        # Analysis tools
+├── tests/               # Test suite
+├── results/             # Output directory (auto-created)
+└── scripts/             # Utility shell scripts
+```
 
-### Neural Network Training
+## Installation
 
-The project offers multiple approaches for training neural networks, primarily configured via `configs/training_config.yaml`. Key model definitions, such as the Multi-Layer Perceptron (MLP), are typically found in `src/models/torch_mlp.py`.
+### Prerequisites
+- Python 3.9+
+- Conda (recommended) or pip
+- CUDA toolkit (optional, for GPU support)
 
-All training processes are designed to integrate with the broader pipeline of activation extraction and topological analysis. Device support (CPU, CUDA, Apple MPS) can be specified in the configuration file.
+### Setup
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd Homology
+```
+
+2. Create and activate conda environment:
+```bash
+conda create -y -n myenv python=3.9
+conda activate myenv
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+```
+
+## Quick Start
+
+### Run the Complete Pipeline
+```bash
+# Using the provided script (handles environment setup)
+./run_main.sh
+
+# Or directly with Python (requires activated environment)
+python main.py
+```
+
+### Run Tests
+```bash
+./run_tests.sh
+```
+
+## Pipeline Description
+
+### 1. Data Generation (`src/data/`)
+
+The pipeline begins by generating synthetic datasets, primarily torus pairs (linked/unlinked):
+
+- **`dataset.py`**: Core module for torus generation
+  - `generate()`: Creates complex torus pair datasets with configurable parameters
+  - `gen_easy()`: Simplified torus generation for testing
+  - `farthest_point_sampling()`: Reduces point cloud size while preserving structure
+  
+- **Visualization tools**:
+  - `visualize_dataset.py`: 2D projections of datasets
+  - `visualize_dataset_3d.py`: Interactive 3D visualizations
+
+### 2. Neural Network Training (`src/models/`)
+
+Multiple training paradigms are supported:
 
 #### Standard PyTorch Training
-    This is the primary approach for training individual PyTorch models.
-    - **Script:** The core logic is typically handled by `src/models/trainer.py` (as utilized by `main.py` for the main pipeline).
-        - *Note: The source code for `src/models/trainer.py` is not directly viewable by the assistant, so this description is based on its usage and project documentation.*
-    - **Model:** It trains MLP architectures defined in `src/models/torch_mlp.py`.
-    - **Configuration:** Highly configurable through `configs/training_config.yaml`, allowing adjustments to model architecture (layers, dimensions, activation functions), learning parameters (epochs, batch size, optimizer, learning rate), early stopping, and other training aspects.
-    - **Features:** Supports functionalities like early stopping, model checkpointing (logic may reside within the trainer or be configured), and extraction of ReLU activations, which are crucial for the subsequent topological analysis.
-    - **Device Support:** Can be run on CPU, CUDA, or Apple MPS, as specified in the `device` setting within the training configuration.
+- **`torch_mlp.py`**: Modern MLP implementation with batch normalization and dropout
+- **`trainer.py`** (in `old_models/`): Simple trainer used by main pipeline
+- Features: Early stopping, activation extraction, device flexibility (CPU/CUDA/MPS)
 
-#### Parallel PyTorch Training (CPU)
-    This approach allows for training multiple instances of the MLP model in parallel, primarily leveraging CPU cores.
-    - **Script:** Implemented in `src/models/torch_parallel.py`, which contains the `ParallelTrainer` class.
-    - **Mechanism:** Utilizes Python's `multiprocessing` library (specifically `ProcessPoolExecutor`) to distribute the training of individual network instances across different processes.
-    - **Configuration:**
-        - The number of networks to train in parallel is set by the `num_networks` parameter in `configs/training_config.yaml`.
-        - The maximum number of parallel worker processes can be specified via `max_parallel_workers` in the same configuration file; if not set, it defaults to the number of CPU cores.
-    - **Use Case:** Useful for experiments requiring multiple model runs with slight variations or for building ensembles, especially when GPU resources are limited or not the primary focus for this type of parallelization.
-    - **Output:** Each network is trained independently, and results (like final accuracy and optionally saved models) are aggregated. Layer activation extraction for each network is also supported.
+#### Parallel Training
+- **`torch_parallel.py`**: Trains multiple networks concurrently using multiprocessing
+- Ideal for ensemble studies or statistical analysis across multiple runs
 
-#### Vectorized PyTorch Training
-    This method provides an efficient way to train an ensemble of neural networks simultaneously on a single device by leveraging PyTorch's vectorization capabilities.
-    - **Script:** Implemented in `src/models/torch_vectorized.py`, featuring the `VectorizedTrainer` class.
-    - **Mechanism:**
-        - Converts the PyTorch MLP model (from `src/models/torch_mlp.py`) into a functional form using `make_functional_with_buffers` (from `torch.func` or `functorch`).
-        - Uses `vmap` to apply operations (forward pass, loss calculation) across multiple model instances (an ensemble) in a vectorized manner. This means a single batch of data is processed by all models in the ensemble concurrently.
-    - **Configuration:**
-        - The number of models in the ensemble is controlled by `num_networks` in `configs/training_config.yaml`.
-    - **Device Support:** Supports execution on CPU, CUDA, or Apple MPS. The vectorization occurs on the selected device, allowing for efficient parallel computation across the ensemble.
-    - **Use Case:** Ideal for training multiple models with the same architecture but potentially different initializations, or for tasks where ensembling is beneficial, while efficiently utilizing hardware resources.
-    - **Output:** Trains all models in the ensemble and can extract layer activations for each model.
+#### Vectorized Training
+- **`torch_vectorized.py`**: Efficient simultaneous training of multiple networks
+- Uses PyTorch's `vmap` for hardware-optimized parallel computation
 
-#### Apple MLX Training
-    The project includes support for Apple's MLX framework, designed for efficient machine learning on Apple Silicon (M1, M2, M3 series chips).
-    - **Framework:** Leverages the MLX library to define and train models, optimizing performance on Apple hardware.
-    - **Scripts:** Several MLX-based trainers are available, including (based on project structure and documentation):
-        - `src/models/trainer_mlx.py` (or its updated versions like `trainer_mlx_v2.py`): For standard training of models using MLX.
-        - `src/models/trainer_mlx_parallel.py`: Likely provides capabilities for parallel training of MLX models.
-        - `src/models/vectorised_mlx.py`: May offer vectorized training similar to the PyTorch version but implemented in MLX.
-        - *Note: The source code for these specific MLX trainer scripts was not directly viewable by the assistant. Their exact functionalities are inferred from naming conventions, project documentation (`CLAUDE.md`), and the presence of their compiled versions. For precise details, refer to the respective source files if available, or project maintainers.*
-    - **Configuration:** Similar to PyTorch trainers, MLX training scripts are expected to be configurable via `configs/training_config.yaml`, allowing adjustments for model parameters, training hyperparameters, and data.
-    - **Use Case:** Intended for users who wish to develop or train models specifically within the Apple MLX ecosystem, taking full advantage of Apple Silicon's unified memory architecture and performance characteristics.
+#### Decision Boundary Extraction
+- **`decision_boundary_trainer.py`**: Specialized trainer that extracts decision boundaries during training
+- Captures boundary evolution at specified epoch intervals
 
-### Topological Analysis
-- `homology.py`: Core homology computation module
-  - `compute_persistent_homology()`: Computes persistent homology using Gudhi
-  - `multi_hom()`: Parallel implementation for multiple computations
-  - `multi_pers()`: Computes both persistence diagrams and Betti numbers
-  - `wes_dist()`: Computes Wasserstein distance between persistence diagrams
+#### Apple Silicon Support (MLX)
+- Various MLX implementations in `old_models/` for M1/M2/M3 optimization
+- Leverages unified memory architecture for efficient computation
 
-### Visualization
-- `plot_curves.py`: Visualization tools for topological analysis results
-  - `plot_curves_from_h5()`: Plots Betti number curves with statistics
-- `umaplot.py`: Additional visualization utilities
+### 3. Topological Analysis (`src/topology/`)
 
-### Supporting Files
-- `distance.py`: Distance computation utilities
-- `mps.py`: Apple MPS (Metal Performance Shaders) specific implementations
-- `multi_trackH.py`: Tracking homology changes during training
-- `multi_hom.py`: Parallel homology computation utilities
+Computes persistent homology on extracted activations:
 
-## Pipeline Flow
-1. Data Generation: Create synthetic datasets using `data.py`
-2. Network Training: Train neural networks using the configured approach (see "Neural Network Training" section).
-3. Activation Extraction: Extract layer activations during training
-4. Topological Analysis: Compute persistent homology using `homology.py`
-5. Visualization: Plot and analyze results using `plot_curves.py`
+- **`homology.py`**: Main implementation using GUDHI
+  - `compute_persistent_homology()`: Core computation function
+  - Outputs: persistence diagrams, barcodes, Betti numbers
+  
+- **Alternative implementations**:
+  - `homology_ripser.py`: Ripser-based computation (often faster)
+  - `witness_torch.py`: PyTorch-based witness complex computation
+  - `compute_boundary_homology.py`: Specialized for decision boundaries
 
-## Dependencies
-- PyTorch
-- NumPy
-- Gudhi
-- Matplotlib
-- Plotly
-- scikit-learn
-- h5py
+### 4. Visualization (`src/visualization/`)
 
-## Usage
-1. Generate or load your dataset
-2. Configure your training session (model, hyperparameters, data, specific training script/method) in `configs/training_config.yaml` and then train the neural network using the chosen approach (e.g., standard PyTorch, parallel, vectorized, or MLX).
-3. Extract activations and compute homology
-4. Visualize results using plotting utilities
+Rich visualization capabilities for analysis results:
 
-## Notes
-- As detailed in the "Neural Network Training" section, several distinct training scripts and methodologies (Standard PyTorch, Parallel PyTorch, Vectorized PyTorch, Apple MLX) are available, each catering to different needs and hardware capabilities.
-- All training approaches are primarily configured via `configs/training_config.yaml`. Refer to this file and the relevant training scripts for specific parameters.
-- Comprehensive device support is available, including CPU, NVIDIA GPUs (CUDA), and Apple Silicon GPUs (MPS), configurable through the training configuration file.
+- **`plot_curves.py`**: Betti curve visualization across layers
+- **`betti_curves.py`**: Advanced statistical analysis of Betti numbers
+- **`decision_boundary_viz.py`**: 3D decision boundary evolution
+- **`uma_plot.py`**: UMAP-based dimensionality reduction plots
+
+### 5. Utilities (`src/utils/`)
+
+Supporting functions for the pipeline:
+
+- **`graph.py`**: Distance matrix computation for Rips complex
+- **`distance_computation.py`**: Various distance metrics
+- **`parameter_grid_search.py`**: Hyperparameter optimization
+- **`compute_torus_homology_*.py`**: Ground truth homology computation
+
+## Configuration
+
+The pipeline is controlled via YAML configuration files in `configs/`:
+
+### `training_config.yaml`
+```yaml
+model:
+  width: 100          # Hidden layer width
+  layers: 5           # Number of layers
+  
+training:
+  epochs: 200
+  batch_size: 32
+  learning_rate: 0.001
+  device: 'auto'      # 'cpu', 'cuda', 'mps', or 'auto'
+  
+data:
+  generation:
+    n: 1000           # Points per torus
+    big_radius: 10
+    small_radius: 3
+```
+
+### `homology_config.yaml`
+```yaml
+computation:
+  max_dimension: 2    # Maximum homology dimension
+  max_edge_length: 3.0
+  num_neighbors: 50   # For k-NN graph construction
+```
+
+### `decision_boundary_config.yaml`
+```yaml
+extraction:
+  grid:
+    resolution: [100, 100, 100]
+  boundary_detection:
+    threshold: 0.5
+    tolerance: 0.01
+```
+
+## Advanced Features
+
+### Decision Boundary Analysis
+
+Track how decision boundaries evolve during training:
+
+```python
+# Enable in decision_boundary_config.yaml
+training:
+  extraction_schedule:
+    enabled: true
+    frequency: 5  # Extract every 5 epochs
+```
+
+### Parallel Training
+
+Train multiple networks simultaneously:
+
+```python
+# In training_config.yaml
+num_networks: 10
+max_parallel_workers: 4
+```
+
+### Hyperparameter Optimization
+
+```bash
+./run_optimization.sh
+```
+
+## Results and Visualization
+
+Results are organized in the `results/` directory:
+
+```
+results/
+├── models/          # Trained model checkpoints
+├── plots/           # Dataset and Betti curve visualizations
+├── homology/        # Persistence diagrams and Betti numbers
+└── decision_boundaries/  # Boundary evolution data
+```
+
+### Key Outputs
+
+1. **Betti Curves**: Show topological complexity across network layers
+2. **Persistence Diagrams**: Visualize birth-death of topological features
+3. **Decision Boundaries**: 3D visualizations of classification surfaces
+4. **Training Metrics**: Loss curves, accuracy, and convergence analysis
+
+## Testing
+
+Run the test suite to verify installation:
+
+```bash
+# All tests
+./run_tests.sh
+
+# Specific test
+pytest tests/test_pipeline.py -v
+
+# Boundary extraction test
+python test_boundary_training.py
+```
+
+## Advanced Usage
+
+### Custom Datasets
+
+Implement custom data generation:
+
+```python
+from src.data.dataset import DatasetGenerator
+
+def custom_dataset(n_points):
+    # Your implementation
+    return X, y
+```
+
+### Adding New Topological Features
+
+Extend the homology computation:
+
+```python
+from src.topology.homology import BaseHomology
+
+class CustomHomology(BaseHomology):
+    def compute(self, data):
+        # Your implementation
+        pass
+```
+
+### Batch Processing
+
+For large-scale experiments:
+
+```bash
+# Configure multiple runs in configs/
+python -m src.utils.batch_runner
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **CUDA/MPS not available**: Set `device: 'cpu'` in `training_config.yaml`
+2. **Memory errors**: Reduce `batch_size` or `grid.resolution`
+3. **Import errors**: Ensure `PYTHONPATH` includes project root
+
+### Performance Tips
+
+- Use `torch_vectorized.py` for multiple network training
+- Enable `cache_predictions` in `decision_boundary_config.yaml`
+- Adjust `num_workers` for optimal parallelization
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@software{neural_topology_analysis,
+  title={Neural Network Topological Analysis},
+  author={Your Name},
+  year={2024},
+  url={repository-url}
+}
+```
+
+## License
+
+[Specify your license here]
+
+## Acknowledgments
+
+This project uses:
+- [GUDHI](https://gudhi.inria.fr/) for topological computations
+- [PyTorch](https://pytorch.org/) for neural network training
+- [Plotly](https://plotly.com/) for interactive visualizations

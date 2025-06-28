@@ -405,6 +405,40 @@ def train_model(config_path):
         print(f"Layer outputs saved to: {output_file}")
     else:
         print("Layer extraction disabled. Skipping layer output extraction.")
+    
+    # Extract train/test activations separately if enabled
+    if layer_extraction_config.get('train_test_layer_extraction', False):
+        print("\nExtracting train and test layer outputs separately...")
+        
+        # Create output directory for train/test outputs
+        train_test_output_dir = Path(layer_extraction_config.get('train_test_output_dir', 'results/train_test_layer_outputs'))
+        train_test_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract train dataset activations
+        print("Extracting train dataset activations...")
+        train_layer_outputs = model.extract_layer_outputs(train_loader, device)
+        train_output_file = train_test_output_dir / 'torch_mlp_train_layer_outputs.pt'
+        torch.save({
+            'layer_outputs': train_layer_outputs.cpu(),
+            'dataset_type': 'train',
+            'dataset_size': len(train_dataset),
+            'config': config
+        }, train_output_file)
+        print(f"Train layer outputs saved to: {train_output_file}")
+        
+        # Extract test dataset activations
+        print("Extracting test dataset activations...")
+        test_layer_outputs = model.extract_layer_outputs(test_loader, device)
+        test_output_file = train_test_output_dir / 'torch_mlp_test_layer_outputs.pt'
+        torch.save({
+            'layer_outputs': test_layer_outputs.cpu(),
+            'dataset_type': 'test',
+            'dataset_size': len(test_dataset),
+            'config': config
+        }, test_output_file)
+        print(f"Test layer outputs saved to: {test_output_file}")
+        
+        print(f"Train/test layer extraction complete. Shape: {train_layer_outputs.shape}")
 
 # --- Main Execution Block ---
 if __name__ == "__main__":

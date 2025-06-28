@@ -78,7 +78,7 @@ data:
     interior_noise: 0.01 # Noise level for interior points when solid=true (0.05-0.2 recommended)
 
   # Train/test split options
-  split_ratio: 0.85     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
+  split_ratio: 0.80     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
                                # This replaces the old 'test_size' (0.2 test_size is 0.8 split_ratio)
   shuffle_data: true   # Whether to shuffle data before splitting
   random_seed_data: 42 # Random seed for data generation and splitting
@@ -86,5 +86,7 @@ data:
 
 # Layer extraction settings
 layer_extraction:
-  enabled: true     # If true, extract and save layer outputs
+  enabled: false     # If true, extract and save layer outputs
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
+  train_test_layer_extraction: true  # If true, extract train and test activations separately for Wasserstein analysis
+  train_test_output_dir: 'results/train_test_layer_outputs'  # Directory for separate train/test activations
