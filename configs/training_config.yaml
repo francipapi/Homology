@@ -13,7 +13,7 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 50 # Temporarily reduced for testin
+  epochs: 100 # Temporarily reduced for testin
   batch_size: 64    # Increased batch size for MPS
   learning_rate: 0.0015  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
@@ -51,7 +51,7 @@ training:
     min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
 
   # Settings for vectorized and parallel training
-  num_networks: 10 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
   max_parallel_workers: null  # Will default to os.cpu_count()
   save_model_threshold: 0.9 # Optional: Minimum accuracy/metric to save a trained model
 
@@ -86,7 +86,63 @@ data:
 
 # Layer extraction settings
 layer_extraction:
-  enabled: false     # If true, extract and save layer outputs
+  enabled: true     # If true, extract and save layer outputs
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
   train_test_layer_extraction: true  # If true, extract train and test activations separately for Wasserstein analysis
   train_test_output_dir: 'results/train_test_layer_outputs'  # Directory for separate train/test activations
+
+# Custom architecture configuration
+custom_architecture:
+  enabled: true  # Set to true to use custom architecture instead of standard MLP
+  input_shape: [3]  # Input shape - [3] for 1D input, [1, 28, 28] for 2D images, etc.
+  
+  # Define layers sequentially
+  # Each layer is processed in order, with automatic shape inference
+  layers:
+    # Example 1: Simple Linear + Conv1D architecture
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+    
+    # Reshape to add channel dimension for conv1d
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
+    
+    - type: flatten
+    
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+    
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+    
+    - type: linear
+      out_features: 1
+      activation: sigmoid
+  
+  
+  # Layer extraction settings for custom architectures
+  extract_from_layers: "all"  # "all" or list of layer indices to extract from
+  flatten_conv_activations: true  # Flatten conv activations for homology computation
