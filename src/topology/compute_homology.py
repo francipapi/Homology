@@ -15,7 +15,7 @@ import glob
 import yaml
 import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Union
 import gudhi as gd
 
 # Import distance computation functions
@@ -103,15 +103,16 @@ def compute_persistent_homology_betti(distance_matrix: np.ndarray, max_dimension
         return [1] + [0] * max_dimension
 
 
-def load_layer_outputs(input_dir: str) -> Dict[str, torch.Tensor]:
+def load_layer_outputs(input_dir: str) -> Dict[str, Union[torch.Tensor, Dict]]:
     """
     Load all layer output files from the input directory.
+    Supports both padded tensor format and variable-length dictionary format.
     
     Parameters:
     - input_dir: Directory containing layer output .pt files
     
     Returns:
-    - Dictionary mapping filename to layer output tensors
+    - Dictionary mapping filename to layer output tensors or dicts
     """
     layer_files = {}
     pattern = os.path.join(input_dir, "*.pt")
@@ -120,11 +121,25 @@ def load_layer_outputs(input_dir: str) -> Dict[str, torch.Tensor]:
         filename = os.path.basename(file_path)
         try:
             data = torch.load(file_path, map_location='cpu')
-            if isinstance(data, dict) and 'layer_outputs' in data:
-                layer_files[filename] = data['layer_outputs']
+            if isinstance(data, dict):
+                if 'layer_outputs' in data:
+                    layer_outputs = data['layer_outputs']
+                    # Check if this is variable-length format
+                    if data.get('variable_length', False) and isinstance(layer_outputs, dict):
+                        print(f"Loaded {filename}: Variable-length format with {len(layer_outputs)} layers")
+                        layer_files[filename] = layer_outputs
+                    else:
+                        layer_files[filename] = layer_outputs
+                        if hasattr(layer_outputs, 'shape'):
+                            print(f"Loaded {filename}: {layer_outputs.shape}")
+                        else:
+                            print(f"Loaded {filename}")
+                else:
+                    layer_files[filename] = data
+                    print(f"Loaded {filename}: {data.shape if hasattr(data, 'shape') else 'Loaded'}")
             else:
                 layer_files[filename] = data
-            print(f"Loaded {filename}: {layer_files[filename].shape}")
+                print(f"Loaded {filename}: {data.shape if hasattr(data, 'shape') else 'Loaded'}")
         except Exception as e:
             print(f"Warning: Could not load {filename}: {e}")
     
@@ -213,34 +228,62 @@ def compute_layer_homology(config_path: str = "configs/homology_config.yaml") ->
     for filename, layer_outputs in layer_files.items():
         print(f"\nProcessing {filename}...")
         
-        # Convert to numpy if needed
-        if isinstance(layer_outputs, torch.Tensor):
-            layer_outputs = layer_outputs.cpu().numpy()
-        
-        # Expected shape: [num_networks, num_layers, num_samples, layer_dim]
-        if layer_outputs.ndim == 4:
-            num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
-            print(f"Shape: [{num_networks}, {num_layers}, {num_samples}, {layer_dim}]")
+        # Handle variable-length dictionary format
+        if isinstance(layer_outputs, dict) and not hasattr(layer_outputs, 'shape'):
+            # Variable-length format
+            num_layers = len(layer_outputs)
+            num_networks = 1  # Assuming single network for now
+            print(f"Variable-length format: {num_layers} layers")
             
             # Initialize results tensor for this file
             betti_results = np.zeros((num_networks, num_layers, max_dimension + 1), dtype=np.int32)
             
-            # Process each network and layer
-            for net_idx in range(num_networks):
-                for layer_idx in range(num_layers):
-                    # Extract single layer activations: (num_samples, layer_dim)
-                    layer_data = layer_outputs[net_idx, layer_idx]
-                    
-                    # Compute Betti numbers for this layer
-                    betti_numbers = process_single_layer(layer_data, config, layer_idx)
-                    
-                    # Store results (truncate to max_dimension + 1 if needed)
-                    betti_results[net_idx, layer_idx] = betti_numbers[:max_dimension + 1]
+            # Process each layer
+            for layer_idx, layer_tensor in sorted(layer_outputs.items()):
+                # Convert to numpy if needed
+                if isinstance(layer_tensor, torch.Tensor):
+                    layer_data = layer_tensor.cpu().numpy()
+                else:
+                    layer_data = layer_tensor
+                
+                # Compute Betti numbers for this layer
+                betti_numbers = process_single_layer(layer_data, config, int(layer_idx))
+                
+                # Store results (truncate to max_dimension + 1 if needed)
+                betti_results[0, int(layer_idx)] = betti_numbers[:max_dimension + 1]
             
             all_betti_results[filename] = betti_results
             
         else:
-            print(f"Warning: Unexpected shape {layer_outputs.shape} for {filename}, skipping...")
+            # Standard tensor format
+            # Convert to numpy if needed
+            if isinstance(layer_outputs, torch.Tensor):
+                layer_outputs = layer_outputs.cpu().numpy()
+            
+            # Expected shape: [num_networks, num_layers, num_samples, layer_dim]
+            if layer_outputs.ndim == 4:
+                num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
+                print(f"Shape: [{num_networks}, {num_layers}, {num_samples}, {layer_dim}]")
+                
+                # Initialize results tensor for this file
+                betti_results = np.zeros((num_networks, num_layers, max_dimension + 1), dtype=np.int32)
+                
+                # Process each network and layer
+                for net_idx in range(num_networks):
+                    for layer_idx in range(num_layers):
+                        # Extract single layer activations: (num_samples, layer_dim)
+                        layer_data = layer_outputs[net_idx, layer_idx]
+                        
+                        # Compute Betti numbers for this layer
+                        betti_numbers = process_single_layer(layer_data, config, layer_idx)
+                        
+                        # Store results (truncate to max_dimension + 1 if needed)
+                        betti_results[net_idx, layer_idx] = betti_numbers[:max_dimension + 1]
+                
+                all_betti_results[filename] = betti_results
+                
+            else:
+                print(f"Warning: Unexpected shape {layer_outputs.shape} for {filename}, skipping...")
     
     # Save results
     if all_betti_results:

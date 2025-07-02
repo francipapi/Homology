@@ -19,7 +19,7 @@ sampling:
 
 # Distance Matrix Configuration  
 distance:                     # "knn" (geodesic on k-NN graph) or "full" (Euclidean)
-  k_neighbors: 15                # Number of nearest neighbors for k-NN graph construction
+  k_neighbors: 35                # Number of nearest neighbors for k-NN graph construction
   metric: "euclidian"                  # Base metric for k-NN graph edges ("euclidean", "cosine", "manhattan")
   geodesic: true                       # Use geodesic distances on k-NN graph (always true for method="knn")            # "euclidean" (actual distances) or "uniform" (all edges = 1)          # Density threshold for graph connectivity warnings
 

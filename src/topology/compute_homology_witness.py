@@ -475,40 +475,66 @@ def create_witness_layer_tasks(layer_files: Dict, config: Dict) -> List[WitnessL
     Create a list of all layer processing tasks for parallel witness complex execution.
     
     Flattens the nested structure of (filename, network, layer) into a single
-    task queue for optimal load balancing.
+    task queue for optimal load balancing. Supports both padded tensor format
+    and variable-length dictionary format.
     """
     tasks = []
     task_id = 0
     
     for filename, layer_outputs_orig in layer_files.items():
-        # Convert to numpy if needed (but keep original in layer_files)
-        if isinstance(layer_outputs_orig, torch.Tensor):
-            layer_outputs = layer_outputs_orig.cpu().numpy()
-        else:
-            layer_outputs = layer_outputs_orig
-        
-        # Expected shape: [num_networks, num_layers, num_samples, layer_dim]
-        if layer_outputs.ndim == 4:
-            num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
+        # Handle variable-length dictionary format
+        if isinstance(layer_outputs_orig, dict) and not hasattr(layer_outputs_orig, 'shape'):
+            # This is a variable-length format: {layer_idx: tensor}
+            # Assume single network for now (extend if needed)
+            num_networks = 1
             
-            # Create tasks for each (network, layer) combination
-            for net_idx in range(num_networks):
-                for layer_idx in range(num_layers):
-                    # Extract single layer activations: (num_samples, layer_dim)
-                    layer_data = layer_outputs[net_idx, layer_idx].copy()  # Copy to avoid shared memory issues
-                    
-                    task = WitnessLayerTask(
-                        layer_data=layer_data,
-                        config=config,
-                        filename=filename,
-                        net_idx=net_idx,
-                        layer_idx=layer_idx,
-                        task_id=task_id
-                    )
-                    tasks.append(task)
-                    task_id += 1
+            for layer_idx, layer_tensor in sorted(layer_outputs_orig.items()):
+                if isinstance(layer_tensor, torch.Tensor):
+                    layer_data = layer_tensor.cpu().numpy()
+                else:
+                    layer_data = layer_tensor
+                
+                # Create task for this layer
+                task = WitnessLayerTask(
+                    layer_data=layer_data.copy(),  # Copy to avoid shared memory issues
+                    config=config,
+                    filename=filename,
+                    net_idx=0,  # Single network for variable-length format
+                    layer_idx=int(layer_idx) if isinstance(layer_idx, str) else layer_idx,
+                    task_id=task_id
+                )
+                tasks.append(task)
+                task_id += 1
         else:
-            print(f"Warning: Unexpected shape {layer_outputs.shape} for {filename}, skipping...")
+            # Handle standard tensor format
+            # Convert to numpy if needed (but keep original in layer_files)
+            if isinstance(layer_outputs_orig, torch.Tensor):
+                layer_outputs = layer_outputs_orig.cpu().numpy()
+            else:
+                layer_outputs = layer_outputs_orig
+            
+            # Expected shape: [num_networks, num_layers, num_samples, layer_dim]
+            if layer_outputs.ndim == 4:
+                num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
+                
+                # Create tasks for each (network, layer) combination
+                for net_idx in range(num_networks):
+                    for layer_idx in range(num_layers):
+                        # Extract single layer activations: (num_samples, layer_dim)
+                        layer_data = layer_outputs[net_idx, layer_idx].copy()  # Copy to avoid shared memory issues
+                        
+                        task = WitnessLayerTask(
+                            layer_data=layer_data,
+                            config=config,
+                            filename=filename,
+                            net_idx=net_idx,
+                            layer_idx=layer_idx,
+                            task_id=task_id
+                        )
+                        tasks.append(task)
+                        task_id += 1
+            else:
+                print(f"Warning: Unexpected shape {layer_outputs.shape} for {filename}, skipping...")
     
     return tasks
 
@@ -518,7 +544,7 @@ def aggregate_witness_results(results: List[WitnessLayerResult], layer_files: Di
     Aggregate parallel processing results back into the original data structure.
     
     Reconstructs the [num_networks, num_layers, max_dimension] tensor format
-    from the flattened task results.
+    from the flattened task results. Handles both padded tensor and variable-length formats.
     """
     all_betti_results = {}
     
@@ -529,19 +555,18 @@ def aggregate_witness_results(results: List[WitnessLayerResult], layer_files: Di
             results_by_file[result.filename] = []
         results_by_file[result.filename].append(result)
     
-    # Reconstruct the original tensor structure for each file
+    # Reconstruct the original structure for each file
     for filename, file_results in results_by_file.items():
         if filename not in layer_files:
             continue
             
         layer_outputs = layer_files[filename]
-        if isinstance(layer_outputs, torch.Tensor):
-            layer_outputs = layer_outputs.cpu().numpy()
-        elif not isinstance(layer_outputs, np.ndarray):
-            layer_outputs = np.array(layer_outputs)
         
-        if layer_outputs.ndim == 4:
-            num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
+        # Handle variable-length dictionary format
+        if isinstance(layer_outputs, dict) and not hasattr(layer_outputs, 'shape'):
+            # Variable-length format
+            num_layers = len(layer_outputs)
+            num_networks = 1  # Assuming single network for now
             
             # Initialize results tensor
             betti_results = np.zeros((num_networks, num_layers, max_dimension + 1), dtype=np.int32)
@@ -557,6 +582,30 @@ def aggregate_witness_results(results: List[WitnessLayerResult], layer_files: Di
                 betti_results[result.net_idx, result.layer_idx] = betti_numbers
             
             all_betti_results[filename] = betti_results
+        else:
+            # Standard tensor format
+            if isinstance(layer_outputs, torch.Tensor):
+                layer_outputs = layer_outputs.cpu().numpy()
+            elif not isinstance(layer_outputs, np.ndarray):
+                layer_outputs = np.array(layer_outputs)
+            
+            if layer_outputs.ndim == 4:
+                num_networks, num_layers, num_samples, layer_dim = layer_outputs.shape
+                
+                # Initialize results tensor
+                betti_results = np.zeros((num_networks, num_layers, max_dimension + 1), dtype=np.int32)
+                
+                # Fill in results from parallel processing
+                for result in file_results:
+                    if result.success:
+                        betti_numbers = result.betti_numbers[:max_dimension + 1]
+                    else:
+                        # Use default values for failed computations
+                        betti_numbers = [1] + [0] * max_dimension
+                    
+                    betti_results[result.net_idx, result.layer_idx] = betti_numbers
+                
+                all_betti_results[filename] = betti_results
     
     return all_betti_results
 
@@ -792,8 +841,11 @@ def process_single_layer_witness_optimized(layer_activations: Union[torch.Tensor
         return [0] * (max_dimension + 1)
 
 
-def load_layer_outputs(input_dir: str) -> Dict[str, torch.Tensor]:
-    """Load all layer output files from the input directory."""
+def load_layer_outputs(input_dir: str) -> Dict[str, Union[torch.Tensor, Dict]]:
+    """
+    Load all layer output files from the input directory.
+    Supports both padded tensor format and variable-length dictionary format.
+    """
     layer_files = {}
     pattern = os.path.join(input_dir, "*.pt")
     
@@ -801,11 +853,25 @@ def load_layer_outputs(input_dir: str) -> Dict[str, torch.Tensor]:
         filename = os.path.basename(file_path)
         try:
             data = torch.load(file_path, map_location='cpu')
-            if isinstance(data, dict) and 'layer_outputs' in data:
-                layer_files[filename] = data['layer_outputs']
+            if isinstance(data, dict):
+                if 'layer_outputs' in data:
+                    layer_outputs = data['layer_outputs']
+                    # Check if this is variable-length format
+                    if data.get('variable_length', False) and isinstance(layer_outputs, dict):
+                        print(f"  📄 {filename}: Variable-length format with {len(layer_outputs)} layers")
+                        layer_files[filename] = layer_outputs
+                    else:
+                        layer_files[filename] = layer_outputs
+                        if hasattr(layer_outputs, 'shape'):
+                            print(f"  📄 {filename}: {layer_outputs.shape}")
+                        else:
+                            print(f"  📄 {filename}: Loaded")
+                else:
+                    layer_files[filename] = data
+                    print(f"  📄 {filename}: {data.shape if hasattr(data, 'shape') else 'Loaded'}")
             else:
                 layer_files[filename] = data
-            print(f"  📄 {filename}: {layer_files[filename].shape}")
+                print(f"  📄 {filename}: {data.shape if hasattr(data, 'shape') else 'Loaded'}")
         except Exception as e:
             print(f"  ⚠️  Could not load {filename}: {e}")
     

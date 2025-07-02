@@ -13,7 +13,7 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 100 # Temporarily reduced for testin
+  epochs: 2 # Temporarily reduced for testing
   batch_size: 64    # Increased batch size for MPS
   learning_rate: 0.0015  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
@@ -90,6 +90,7 @@ layer_extraction:
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
   train_test_layer_extraction: true  # If true, extract train and test activations separately for Wasserstein analysis
   train_test_output_dir: 'results/train_test_layer_outputs'  # Directory for separate train/test activations
+  variable_length_output: true  # If true, save layer outputs without padding (preserves natural dimensions)
 
 # Custom architecture configuration
 custom_architecture:
@@ -123,20 +124,30 @@ custom_architecture:
       padding: 0  # No padding needed
       activation: relu
       batch_norm: false
+
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
+
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
     
     - type: flatten
-    
-    - type: linear
-      out_features: 32
-      activation: relu
-      batch_norm: false
-      dropout: 0.0
-    
-    - type: linear
-      out_features: 32
-      activation: relu
-      batch_norm: false
-      dropout: 0.0
     
     - type: linear
       out_features: 1
@@ -146,3 +157,4 @@ custom_architecture:
   # Layer extraction settings for custom architectures
   extract_from_layers: "all"  # "all" or list of layer indices to extract from
   flatten_conv_activations: true  # Flatten conv activations for homology computation
+  skip_final_layer: true  # Skip extracting the final output layer (dimension 1)

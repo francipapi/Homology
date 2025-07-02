@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from torch.cuda.amp import autocast, GradScaler
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Union
 import sys
 import os
 
@@ -33,6 +33,7 @@ class CustomNet(nn.Module):
         self.layers_config = config['layers']
         self.extract_from_layers = config.get('extract_from_layers', 'all')
         self.flatten_conv_activations = config.get('flatten_conv_activations', True)
+        self.skip_final_layer = config.get('skip_final_layer', True)  # Skip extracting final output layer
         
         # Build the network
         self.layers = nn.ModuleList()
@@ -193,7 +194,23 @@ class CustomNet(nn.Module):
                 self.layers.append(activation_fn)
                 self.layer_types.append(f'activation_{activation_name}')
                 # Mark this position for activation extraction
-                self.activation_indices.append(len(self.layers) - 1)
+                should_extract = True
+                
+                # Skip final output layer if configured to do so
+                if self.skip_final_layer:
+                    # Check if this is a linear layer with output dimension 1
+                    is_final_output = (layer_type == 'linear' and 
+                                     layer_config.get('out_features') == 1 and 
+                                     len(current_shape) == 1 and 
+                                     current_shape[0] == 1)
+                    # Also check if this is the last layer with activation
+                    is_last_layer = (i == len(self.layers_config) - 1)
+                    
+                    if is_final_output or (is_last_layer and current_shape[0] == 1):
+                        should_extract = False
+                
+                if should_extract:
+                    self.activation_indices.append(len(self.layers) - 1)
             
             # Add batch normalization if specified
             if layer_config.get('batch_norm', False):
@@ -270,16 +287,19 @@ class CustomNet(nn.Module):
             return x, hidden_activations
         return x
     
-    def extract_layer_outputs(self, data_loader: DataLoader, device: torch.device) -> torch.Tensor:
+    def extract_layer_outputs(self, data_loader: DataLoader, device: torch.device, 
+                             variable_length: bool = False) -> Union[torch.Tensor, Dict[int, torch.Tensor]]:
         """
         Extract layer outputs for the entire dataset.
         
         Args:
             data_loader: DataLoader containing the dataset
             device: Device to run on
+            variable_length: If True, return dict with variable-length tensors per layer
         
         Returns:
-            Tensor of shape (1, num_layers, dataset_size, feature_dim)
+            If variable_length=False: Tensor of shape (1, num_layers, dataset_size, feature_dim)
+            If variable_length=True: Dict mapping layer_idx to tensor of shape (dataset_size, layer_dim)
         """
         self.eval()
         
@@ -305,27 +325,35 @@ class CustomNet(nn.Module):
         if not activations:
             raise RuntimeError("No activations were collected. Check the model architecture.")
         
-        # Handle different feature dimensions by padding to max dimension
-        max_features = max(act.shape[1] for act in activations)
-        
-        # Pad activations to have same feature dimension
-        padded_activations = []
-        for act in activations:
-            if act.shape[1] < max_features:
-                # Pad with zeros on the right
-                padding = torch.zeros(act.shape[0], max_features - act.shape[1], device=act.device)
-                padded_act = torch.cat([act, padding], dim=1)
-                padded_activations.append(padded_act)
-            else:
-                padded_activations.append(act)
-        
-        # Stack activations to (num_layers, dataset_size, max_feature_dim)
-        stacked_activations = torch.stack(padded_activations, dim=0)
-        
-        # Add batch dimension: (1, num_layers, dataset_size, max_feature_dim)
-        output_tensor = stacked_activations.unsqueeze(0)
-        
-        return output_tensor
+        if variable_length:
+            # Return dictionary with original dimensions preserved
+            layer_outputs_dict = {}
+            for i, act in enumerate(activations):
+                layer_outputs_dict[i] = act.cpu()  # Move to CPU for storage
+            return layer_outputs_dict
+        else:
+            # Original behavior: pad to same dimension
+            # Handle different feature dimensions by padding to max dimension
+            max_features = max(act.shape[1] for act in activations)
+            
+            # Pad activations to have same feature dimension
+            padded_activations = []
+            for act in activations:
+                if act.shape[1] < max_features:
+                    # Pad with zeros on the right
+                    padding = torch.zeros(act.shape[0], max_features - act.shape[1], device=act.device)
+                    padded_act = torch.cat([act, padding], dim=1)
+                    padded_activations.append(padded_act)
+                else:
+                    padded_activations.append(act)
+            
+            # Stack activations to (num_layers, dataset_size, max_feature_dim)
+            stacked_activations = torch.stack(padded_activations, dim=0)
+            
+            # Add batch dimension: (1, num_layers, dataset_size, max_feature_dim)
+            output_tensor = stacked_activations.unsqueeze(0)
+            
+            return output_tensor
 
 
 class Reshape(nn.Module):
@@ -564,17 +592,31 @@ def train_model(config_path: str):
             pin_memory=True if device.type == 'cuda' else False
         )
         
-        layer_outputs_tensor = model.extract_layer_outputs(full_loader, device)
-        print(f"Shape of extracted layer outputs: {layer_outputs_tensor.shape}")
+        # Check if variable length output is requested
+        variable_length = layer_extraction_config.get('variable_length_output', False)
+        layer_outputs = model.extract_layer_outputs(full_loader, device, variable_length=variable_length)
+        
+        if variable_length:
+            print(f"Extracted variable-length layer outputs: {len(layer_outputs)} layers")
+            for idx, tensor in layer_outputs.items():
+                print(f"  Layer {idx}: {tensor.shape}")
+        else:
+            print(f"Shape of extracted layer outputs: {layer_outputs.shape}")
         
         # Save layer outputs
         output_dir = Path(layer_extraction_config.get('output_dir', 'results/layer_outputs'))
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_file = output_dir / 'torch_custom_layer_outputs.pt'
+        
+        if variable_length:
+            # Save with different filename to distinguish format
+            output_file = output_dir / 'torch_custom_layer_outputs_varlen.pt'
+        else:
+            output_file = output_dir / 'torch_custom_layer_outputs.pt'
         
         torch.save({
-            'layer_outputs': layer_outputs_tensor.cpu(),
-            'config': config
+            'layer_outputs': layer_outputs.cpu() if not variable_length else layer_outputs,
+            'config': config,
+            'variable_length': variable_length
         }, output_file)
         print(f"Layer outputs saved to: {output_file}")
     
@@ -587,25 +629,37 @@ def train_model(config_path: str):
         
         # Extract train dataset activations
         print("Extracting train dataset activations...")
-        train_layer_outputs = model.extract_layer_outputs(train_loader, device)
-        train_output_file = train_test_output_dir / 'torch_custom_train_layer_outputs.pt'
+        train_layer_outputs = model.extract_layer_outputs(train_loader, device, variable_length=variable_length)
+        
+        if variable_length:
+            train_output_file = train_test_output_dir / 'torch_custom_train_layer_outputs_varlen.pt'
+        else:
+            train_output_file = train_test_output_dir / 'torch_custom_train_layer_outputs.pt'
+            
         torch.save({
-            'layer_outputs': train_layer_outputs.cpu(),
+            'layer_outputs': train_layer_outputs.cpu() if not variable_length else train_layer_outputs,
             'dataset_type': 'train',
             'dataset_size': len(train_dataset),
-            'config': config
+            'config': config,
+            'variable_length': variable_length
         }, train_output_file)
         print(f"Train layer outputs saved to: {train_output_file}")
         
         # Extract test dataset activations
         print("Extracting test dataset activations...")
-        test_layer_outputs = model.extract_layer_outputs(test_loader, device)
-        test_output_file = train_test_output_dir / 'torch_custom_test_layer_outputs.pt'
+        test_layer_outputs = model.extract_layer_outputs(test_loader, device, variable_length=variable_length)
+        
+        if variable_length:
+            test_output_file = train_test_output_dir / 'torch_custom_test_layer_outputs_varlen.pt'
+        else:
+            test_output_file = train_test_output_dir / 'torch_custom_test_layer_outputs.pt'
+            
         torch.save({
-            'layer_outputs': test_layer_outputs.cpu(),
+            'layer_outputs': test_layer_outputs.cpu() if not variable_length else test_layer_outputs,
             'dataset_type': 'test',
             'dataset_size': len(test_dataset),
-            'config': config
+            'config': config,
+            'variable_length': variable_length
         }, test_output_file)
         print(f"Test layer outputs saved to: {test_output_file}")
         

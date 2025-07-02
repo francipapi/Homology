@@ -1,0 +1,124 @@
+# Network Homology Configuration
+# This configuration file controls the persistent homology analysis of neural network architectures
+
+network_homology:
+  enabled: true
+  track_interval: 10  # Track every N training steps
+  save_diagrams: true
+  save_interval: 100  # Save diagrams every N steps
+  
+  graph_construction:
+    backend: "graph-tool"  # Primary choice (fastest)
+    fallback_backend: "igraph"  # If graph-tool unavailable
+    include_bias: true
+    normalize_weights: true
+    weight_threshold: 1e-6  # Ignore weights below this magnitude
+    handle_negative_weights: true  # Deprecated - use weight_encoding instead
+    
+    # Weight encoding method (from nn-similarity)
+    weight_encoding: "standard"  # Options: "standard", "mirror", "reverse"
+    # - standard: Keep original direction and sign
+    # - mirror: Split positive/negative weights with mirror nodes
+    # - reverse: Reverse edges for negative weights, use distance formula
+    
+    # Normalization type
+    normalization_type: "standard"  # Options: "standard", "nn_similarity"
+    # - standard: Divide by max weight
+    # - nn_similarity: Convert to distances using formula from nn-similarity
+    
+    # Minimum edge distance for reverse encoding and nn_similarity normalization
+    min_edge_distance: 1e-6
+    
+    # MLP-specific settings
+    mlp:
+      direct_edges: true
+      
+    # CNN-specific settings  
+    cnn:
+      use_factor_graph: true  # Use factor graph representation for conv layers
+      include_spatial_structure: true  # Store spatial position information
+      parameter_node_prefix: "param_"
+      sparse_threshold: 0.01  # Ignore weights below this for sparse representation
+    
+  simplicial_complex:
+    max_dimension: 2  # Maximum homology dimension to compute
+    max_edge_length: 1.0  # Maximum edge weight in filtration (after normalization)
+    filtration_type: "sublevel"  # Use edge weights as sublevel filtration
+    use_directed_flag_complex: true
+    backend: "flagser"  # Primary choice for directed complexes
+    fallback_backend: "gudhi"  # Fallback if flagser unavailable
+    
+  persistence:
+    backend: "auto"  # Automatically select best available backend
+    compute_infinity_features: false  # Whether to include infinite persistence
+    use_gpu: false  # GPU acceleration if available (requires specific libraries)
+    
+  distance_metrics:
+    backend: "custom"  # Use custom implementation to avoid library issues
+    primary_metric: "heat"  # Main metric for tracking ("heat", "wasserstein", "bottleneck", "silhouette")
+    compute_all: false  # Whether to compute all metrics (slower)
+    
+    # Heat kernel parameters (from paper)
+    heat_sigma: 0.1  # Bandwidth parameter for heat kernel
+    
+    # Wasserstein parameters
+    wasserstein_p: 2  # Wasserstein-p distance (typically 1 or 2)
+    
+    # Whether to use parallel computation for distances
+    use_parallel: true
+    
+  correlation_analysis:
+    compute_correlation: true
+    window_size: 20  # Number of recent points for correlation computation
+    metrics_to_correlate:
+      - "validation_accuracy"
+      - "train_loss"
+    
+  visualization:
+    plot_interval: 50  # Generate plots every N tracking steps
+    backend: "plotly"  # Interactive plots
+    static_backend: "matplotlib"  # For publication-quality static plots
+    plot_types:
+      - "distance_vs_validation"  # Main plot from paper
+      - "persistence_evolution"  # How persistence diagrams evolve
+      - "betti_evolution"  # Betti number evolution
+      - "correlation_heatmap"  # Correlation between different metrics
+    save_plots: true
+    plot_format: "png"  # Format for saved plots
+    dpi: 300  # Resolution for static plots
+    
+  optimization:
+    use_sparse: true  # Use sparse matrix representations where possible
+    cache_graphs: true  # Cache graph structure (only weights change)
+    parallel_workers: 4  # Number of workers for parallel operations
+    batch_graph_updates: true  # Update multiple layer weights together
+    
+  output:
+    base_dir: "results/network_homology"
+    save_raw_data: true  # Save all persistence diagrams
+    save_summary_stats: true  # Save summary statistics
+    compression: "gzip"  # Compress saved data ("gzip", "bz2", or null)
+    checkpoint_interval: 1000  # Save checkpoint every N steps
+    
+  # Model-specific configurations
+  model_configs:
+    # Configuration for small models (<1M parameters)
+    small:
+      track_interval: 10
+      max_dimension: 2
+      use_approximation: false
+      
+    # Configuration for medium models (1-10M parameters)  
+    medium:
+      track_interval: 50
+      max_dimension: 1
+      use_approximation: false
+      sparse_threshold: 0.001
+      
+    # Configuration for large models (>10M parameters)
+    large:
+      track_interval: 100
+      max_dimension: 1
+      use_approximation: true
+      approximation_samples: 10000
+      sparse_threshold: 0.01
