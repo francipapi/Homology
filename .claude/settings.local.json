@@ -25,7 +25,8 @@
       "Bash(/opt/anaconda3/envs/myenv/bin/python:*)",
       "Bash(./run_witness_test.sh:*)",
       "Bash(time python:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(/opt/anaconda3/envs/myenv/bin/pip list)"
     ],
     "deny": []
   },

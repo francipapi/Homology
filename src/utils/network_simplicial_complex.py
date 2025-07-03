@@ -90,18 +90,45 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
     edge direction matters (information flow).
     """
     
-    def build_complex(self, graph: Graph) -> Union[sp.csr_matrix, Any]:
+    def __init__(self, *args, use_geodesic_distance: bool = False, 
+                 epsilon_filtering: Optional[float] = None, **kwargs):
+        """
+        Initialize directed flag complex builder.
+        
+        Args:
+            use_geodesic_distance: Whether to use geodesic distances
+            epsilon_filtering: Epsilon value for filtering (None to disable)
+            *args, **kwargs: Passed to parent class
+        """
+        super().__init__(*args, **kwargs)
+        self.use_geodesic_distance = use_geodesic_distance
+        self.epsilon_filtering = epsilon_filtering
+    
+    def build_complex(self, graph: Union[Graph, sp.csr_matrix]) -> Union[sp.csr_matrix, Any]:
         """
         Build directed flag complex from graph.
         
         Args:
-            graph: Directed graph from NetworkGraphBuilder
+            graph: Directed graph from NetworkGraphBuilder or distance matrix
             
         Returns:
             Complex representation suitable for persistence computation
         """
-        # Extract adjacency matrix with weights
-        adjacency_matrix = self._graph_to_weighted_adjacency(graph)
+        # Check if input is already a distance matrix
+        if isinstance(graph, sp.spmatrix):
+            adjacency_matrix = graph
+        else:
+            # Extract adjacency matrix with weights
+            adjacency_matrix = self._graph_to_weighted_adjacency(graph)
+            
+            # Optionally compute geodesic distances
+            if self.use_geodesic_distance:
+                from src.utils.network_geodesic_distance import GraphGeodesicDistance
+                distance_computer = GraphGeodesicDistance(directed=True)
+                adjacency_matrix = distance_computer.compute_distances(adjacency_matrix)
+        
+        # NOTE: Epsilon filtering now applied AFTER persistence computation (nn-evolution style)
+        # This change is critical for matching nn-evolution's methodology
         
         if self.backend == "flagser":
             # Flagser works directly with adjacency matrices
@@ -138,6 +165,55 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
         
         return adjacency
     
+    def _apply_epsilon_filtering(self, adjacency: sp.csr_matrix) -> sp.csr_matrix:
+        """
+        Apply epsilon filtering to remove edges with weight > epsilon.
+        
+        Args:
+            adjacency: Adjacency/distance matrix
+            
+        Returns:
+            Filtered matrix
+        """
+        # Create a copy to avoid modifying the original
+        filtered = adjacency.copy()
+        
+        # Remove edges with weight greater than epsilon
+        filtered.data[filtered.data > self.epsilon_filtering] = 0
+        filtered.eliminate_zeros()
+        
+        return filtered
+    
+    def _filter_persistence_diagrams(self, diagrams: Dict[int, np.ndarray]) -> Dict[int, np.ndarray]:
+        """
+        Apply epsilon filtering to persistence diagrams (nn-evolution style).
+        
+        Filters persistence diagrams by persistence length: keeps points where
+        death - birth > epsilon_filtering.
+        
+        Args:
+            diagrams: Dictionary of persistence diagrams by dimension
+            
+        Returns:
+            Filtered persistence diagrams
+        """
+        filtered_diagrams = {}
+        
+        for dim, dgm in diagrams.items():
+            if len(dgm) == 0:
+                # Empty diagram, keep as is
+                filtered_diagrams[dim] = dgm
+                continue
+                
+            # Calculate persistence (death - birth)
+            persistence_lengths = dgm[:, 1] - dgm[:, 0]
+            
+            # Keep points with persistence > epsilon_filtering
+            mask = persistence_lengths > self.epsilon_filtering
+            filtered_diagrams[dim] = dgm[mask]
+        
+        return filtered_diagrams
+    
     def _build_gudhi_complex(self, adjacency: sp.csr_matrix) -> gd.SimplexTree:
         """Build Gudhi simplex tree from adjacency matrix."""
         if not GUDHI_AVAILABLE:
@@ -173,11 +249,17 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
             Dictionary mapping dimension to persistence diagrams
         """
         if self.backend == "flagser":
-            return self._compute_flagser_persistence(complex)
+            diagrams = self._compute_flagser_persistence(complex)
         elif self.backend == "gudhi":
-            return self._compute_gudhi_persistence(complex)
+            diagrams = self._compute_gudhi_persistence(complex)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
+        
+        # Apply epsilon filtering AFTER persistence computation (nn-evolution style)
+        if self.epsilon_filtering is not None:
+            diagrams = self._filter_persistence_diagrams(diagrams)
+        
+        return diagrams
     
     def _compute_flagser_persistence(self, adjacency: sp.csr_matrix) -> Dict[int, np.ndarray]:
         """Compute persistence using flagser."""
@@ -190,14 +272,18 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
             adjacency,
             max_dimension=self.max_dimension,
             directed=True,
-            filtration="max"  # Use max of edge weights for simplex filtration
+            filtration="max",  # Use max of edge weights for simplex filtration
+            max_edge_weight=self.max_edge_length  # Apply max edge weight constraint
         )
         
         # Extract persistence diagrams
         diagrams = {}
         for dim in range(self.max_dimension + 1):
             if f"dgm{dim}" in result:
-                diagrams[dim] = result[f"dgm{dim}"]
+                dgm = result[f"dgm{dim}"]
+                # Replace infinite values with max_edge_length (following nn-evolution)
+                dgm[dgm == np.inf] = self.max_edge_length
+                diagrams[dim] = dgm
             else:
                 diagrams[dim] = np.empty((0, 2))
         
@@ -224,7 +310,9 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
             # Run flagser
             result = subprocess.run(
                 ['flagser', '--max-dim', str(self.max_dimension), 
-                 '--filtration', 'max', temp_file],
+                 '--filtration', 'max', 
+                 '--max-edge-weight', str(self.max_edge_length),
+                 temp_file],
                 capture_output=True, text=True
             )
             
@@ -405,18 +493,22 @@ class WeightedFiltration(NetworkSimplicialComplex):
             raise ValueError(f"Unknown filtration type: {self.filtration_type}")
 
 
-def compute_network_homology(graph: Graph, 
+def compute_network_homology(graph: Union[Graph, sp.csr_matrix], 
                            max_dimension: int = 2,
                            max_edge_length: float = 1.0,
-                           backend: str = "auto") -> Dict[str, Any]:
+                           backend: str = "auto",
+                           use_geodesic_distance: bool = False,
+                           epsilon_filtering: Optional[float] = None) -> Dict[str, Any]:
     """
     Convenience function to compute homology of a network graph.
     
     Args:
-        graph: Network graph from NetworkGraphBuilder
+        graph: Network graph from NetworkGraphBuilder or distance matrix
         max_dimension: Maximum homology dimension
         max_edge_length: Maximum edge weight for filtration
         backend: Backend to use for computation
+        use_geodesic_distance: Whether to compute geodesic distances
+        epsilon_filtering: Epsilon value for filtering (None to disable)
         
     Returns:
         Dictionary containing:
@@ -428,7 +520,9 @@ def compute_network_homology(graph: Graph,
     complex_builder = DirectedFlagComplex(
         max_dimension=max_dimension,
         max_edge_length=max_edge_length,
-        backend=backend
+        backend=backend,
+        use_geodesic_distance=use_geodesic_distance,
+        epsilon_filtering=epsilon_filtering
     )
     
     # Build complex

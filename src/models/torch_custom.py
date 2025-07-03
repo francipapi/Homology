@@ -87,7 +87,7 @@ class CustomNet(nn.Module):
                     raise ValueError(f"Conv1d requires 2D input [channels, length], got shape {current_shape}")
                 
                 out_channels = layer_config['out_channels']
-                kernel_size = layer_config.get('kernel_size', 3)
+                kernel_size = layer_config.get('kernel_size', 1)
                 stride = layer_config.get('stride', 1)
                 padding = layer_config.get('padding', 0)
                 

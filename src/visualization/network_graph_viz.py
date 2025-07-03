@@ -43,7 +43,6 @@ class NetworkGraphVisualizer:
             'output': '#FFB6C1',     # Light pink
             'parameter': '#FFD700',  # Gold
             'bias': '#DDA0DD',       # Plum
-            'bias_parameter': '#DDA0DD'  # Plum
         }
         
         # Node sizes
@@ -53,7 +52,6 @@ class NetworkGraphVisualizer:
             'output': 30,
             'parameter': 15,
             'bias': 20,
-            'bias_parameter': 15
         }
         
     def visualize_network(self, model: nn.Module, 

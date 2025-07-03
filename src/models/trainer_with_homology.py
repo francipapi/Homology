@@ -63,8 +63,20 @@ class TrainerWithHomology:
         # Initialize homology tracker if enabled
         if self.homology_enabled:
             self.homology_tracker = NetworkHomologyTracker(homology_config)
-            self.track_interval = homology_config.get('network_homology', {}).get('track_interval', 10)
-            print(f"Network homology tracking enabled (interval: {self.track_interval} steps)")
+            
+            # Get alignment settings from simplified configuration
+            alignment_config = homology_config.get('network_homology', {}).get('alignment', {})
+            
+            # Fallback to main config if not found in homology config
+            if not alignment_config and config.get('alignment'):
+                alignment_config = config.get('alignment', {})
+            
+            self.track_mode = str(alignment_config.get('mode', 'epoch'))  # 'epoch' or 'step'
+            self.validation_interval = int(alignment_config.get('validation_interval', 1))  # Every N epochs/steps
+            
+            print(f"Network homology tracking enabled")
+            print(f"  Mode: {self.track_mode} (track every {self.validation_interval} {self.track_mode}s)")
+            print(f"  Perfect alignment: validation and homology measured together")
         else:
             self.homology_tracker = None
             print("Network homology tracking disabled")
@@ -83,6 +95,10 @@ class TrainerWithHomology:
         self.global_step = 0
         self.epoch = 0
         self.best_validation_accuracy = 0.0
+        
+        # Perfect alignment tracking
+        self.synchronized_measurements = []  # Store (step, epoch, homology_distance, validation_accuracy)
+        self.current_test_loader = None  # Store test loader for step-based validation
         
     def _setup_device(self) -> torch.device:
         """Setup and return the appropriate device."""
@@ -182,8 +198,11 @@ class TrainerWithHomology:
         
         return train_loader, test_loader
     
-    def train_epoch(self, train_loader: DataLoader, epoch: int) -> Dict[str, float]:
+    def train_epoch(self, train_loader: DataLoader, epoch: int, test_loader: DataLoader = None) -> Dict[str, float]:
         """Train for one epoch and track homology if enabled."""
+        # Store test loader for step-based validation access
+        self.current_test_loader = test_loader
+        
         self.model.train()
         train_loss_sum = 0
         correct_train = 0
@@ -211,31 +230,17 @@ class TrainerWithHomology:
             total_train += target.size(0)
             correct_train += (predicted == target).sum().item()
             
-            # Track homology if enabled
-            if self.homology_enabled and self.global_step % self.track_interval == 0:
-                homology_start = time.time()
-                
-                # Compute current validation accuracy if needed
-                validation_accuracy = None
-                if batch_idx % 50 == 0:  # Check validation less frequently
-                    validation_accuracy = self._quick_validation(train_loader.dataset)
-                
-                # Track homology
-                distance, snapshot = self.homology_tracker.track_training_step(
-                    model=self.model,
-                    step=self.global_step,
-                    epoch=epoch,
-                    batch_idx=batch_idx,
-                    validation_accuracy=validation_accuracy,
-                    train_loss=loss.item()
+            # Perfect alignment tracking - only for step-based mode
+            # Fix: Skip step 0 to avoid incorrect counting
+            should_track_step = (self.homology_enabled and 
+                               self.track_mode == 'step' and 
+                               self.global_step > 0 and 
+                               self.global_step % self.validation_interval == 0)
+            
+            if should_track_step:
+                self._perform_synchronized_measurement(
+                    epoch, batch_idx, loss.item(), train_loader, homology_times
                 )
-                
-                homology_time = time.time() - homology_start
-                homology_times.append(homology_time)
-                
-                if batch_idx % 100 == 0:
-                    print(f"  Step {self.global_step}: Homology distance = {distance:.4f} "
-                          f"(computed in {homology_time:.2f}s)")
             
             self.global_step += 1
         
@@ -249,6 +254,19 @@ class TrainerWithHomology:
             'train_accuracy': train_accuracy,
             'epoch_time': epoch_time
         }
+        
+        # Perfect alignment tracking - epoch-based mode
+        should_track_epoch = (self.homology_enabled and 
+                            self.track_mode == 'epoch' and 
+                            (epoch + 1) % self.validation_interval == 0)
+        
+        if should_track_epoch:
+            # Perform synchronized measurement at end of epoch
+            validation_accuracy = self._compute_validation_accuracy(test_loader)
+            self._perform_synchronized_measurement(
+                epoch, len(train_loader), avg_train_loss, None, homology_times,
+                validation_accuracy=validation_accuracy
+            )
         
         if homology_times:
             metrics['avg_homology_time'] = np.mean(homology_times)
@@ -312,6 +330,158 @@ class TrainerWithHomology:
         self.model.train()
         return correct / total if total > 0 else 0.0
     
+    def _compute_step_validation_accuracy(self) -> float:
+        """
+        Compute validation accuracy during step-based tracking.
+        
+        This implements proper validation on test set during training steps,
+        following nn-evolution's approach but with better temporal alignment.
+        
+        Returns:
+            Validation accuracy on test set
+        """
+        if self.current_test_loader is None:
+            # Fallback to quick validation if no test loader available
+            return 0.0
+        
+        self.model.eval()
+        correct = 0
+        total = 0
+        
+        # Sample a subset of test data for efficiency during step-based tracking
+        max_samples = self.homology_config.get('alignment', {}).get('quick_validation_samples', 256)
+        samples_processed = 0
+        
+        with torch.no_grad():
+            for data, target in self.current_test_loader:
+                # Stop if we've processed enough samples
+                if samples_processed >= max_samples:
+                    break
+                
+                output = self.model(data)
+                if output.shape != target.shape:
+                    output = output.squeeze(-1)
+                
+                predicted = (output > 0.5).float()
+                correct += (predicted == target).sum().item()
+                total += target.size(0)
+                samples_processed += target.size(0)
+        
+        self.model.train()
+        return correct / total if total > 0 else 0.0
+    
+    def _compute_validation_accuracy(self, test_loader: DataLoader = None) -> float:
+        """
+        Compute validation accuracy for synchronized measurements.
+        
+        Args:
+            test_loader: Test data loader (if None, uses quick validation)
+            
+        Returns:
+            Validation accuracy
+        """
+        if test_loader is None:
+            # Fallback to quick validation on training data
+            return self._quick_validation(None)
+        
+        self.model.eval()
+        correct = 0
+        total = 0
+        
+        with torch.no_grad():
+            for data, target in test_loader:
+                output = self.model(data)
+                if output.shape != target.shape:
+                    output = output.squeeze(-1)
+                
+                predicted = (output > 0.5).float()
+                correct += (predicted == target).sum().item()
+                total += target.size(0)
+        
+        self.model.train()
+        return correct / total if total > 0 else 0.0
+    
+    def _perform_synchronized_measurement(self, epoch: int, batch_idx: int, 
+                                        train_loss: float, train_loader: DataLoader = None,
+                                        homology_times: list = None, 
+                                        validation_accuracy: float = None) -> None:
+        """
+        Perform perfectly synchronized homology and validation measurements.
+        
+        Args:
+            epoch: Current epoch
+            batch_idx: Current batch index
+            train_loss: Current training loss
+            train_loader: Training data loader (for step-based validation)
+            homology_times: List to append computation times
+            validation_accuracy: Pre-computed validation accuracy (for epoch-based)
+        """
+        homology_start = time.time()
+        
+        # Compute validation accuracy if not provided
+        if validation_accuracy is None:
+            if self.track_mode == 'step':
+                # Step-based: use proper validation on test set
+                validation_accuracy = self._compute_step_validation_accuracy()
+            elif train_loader is not None:
+                # Fallback: quick validation on training set (for epoch mode only)
+                validation_accuracy = self._quick_validation(train_loader.dataset)
+            else:
+                # This shouldn't happen, but fallback
+                validation_accuracy = 0.0
+        
+        # Track homology with synchronized validation measurement
+        distance, snapshot = self.homology_tracker.track_training_step(
+            model=self.model,
+            step=self.global_step,
+            epoch=epoch,
+            batch_idx=batch_idx,
+            validation_accuracy=validation_accuracy,
+            train_loss=train_loss
+        )
+        
+        homology_time = time.time() - homology_start
+        if homology_times is not None:
+            homology_times.append(homology_time)
+        
+        # Store synchronized measurement
+        self.synchronized_measurements.append({
+            'step': self.global_step,
+            'epoch': epoch,
+            'batch_idx': batch_idx,
+            'homology_distance': distance,
+            'validation_accuracy': validation_accuracy,
+            'train_loss': train_loss,
+            'computation_time': homology_time
+        })
+        
+        # Print progress with clearer formatting
+        mode_str = f"Epoch {epoch+1}" if self.track_mode == 'epoch' else f"Step {self.global_step}"
+        print(f"  📊 {mode_str}: Homology distance = {distance:.4f}, "
+              f"Validation accuracy = {validation_accuracy:.4f} "
+              f"(computed in {homology_time:.2f}s)")
+    
+    def get_synchronized_data(self) -> Dict[str, np.ndarray]:
+        """
+        Get perfectly aligned homology distances and validation accuracies.
+        
+        Returns:
+            Dictionary with aligned arrays for correlation computation
+        """
+        if not self.synchronized_measurements:
+            return {'distances': np.array([]), 'validations': np.array([])}
+        
+        distances = [m['homology_distance'] for m in self.synchronized_measurements]
+        validations = [m['validation_accuracy'] for m in self.synchronized_measurements]
+        
+        return {
+            'distances': np.array(distances),
+            'validations': np.array(validations),
+            'steps': np.array([m['step'] for m in self.synchronized_measurements]),
+            'epochs': np.array([m['epoch'] for m in self.synchronized_measurements]),
+            'train_losses': np.array([m['train_loss'] for m in self.synchronized_measurements])
+        }
+    
     def train(self, num_epochs: Optional[int] = None) -> Dict[str, Any]:
         """
         Main training loop with homology tracking.
@@ -347,7 +517,7 @@ class TrainerWithHomology:
             self.epoch = epoch
             
             # Train epoch
-            train_metrics = self.train_epoch(train_loader, epoch)
+            train_metrics = self.train_epoch(train_loader, epoch, test_loader)
             
             # Evaluate
             test_metrics = self.evaluate(test_loader)
@@ -390,14 +560,53 @@ class TrainerWithHomology:
             homology_stats = self.homology_tracker.get_summary_statistics()
             results['homology_statistics'] = homology_stats
             
-            # Compute final correlation
-            correlation = self.homology_tracker.compute_correlation_with_validation()
-            results['homology_validation_correlation'] = correlation
+            # Get synchronized data for perfect alignment
+            sync_data = self.get_synchronized_data()
+            results['synchronized_data'] = sync_data
             
-            print(f"\nHomology tracking complete:")
-            print(f"  Total snapshots: {homology_stats['num_snapshots']}")
-            print(f"  Correlation with validation: {correlation:.4f}")
-            print(f"  Average computation time: {homology_stats['average_computation_time']:.2f}s")
+            # Compute correlation using perfectly aligned data
+            if len(sync_data['distances']) > 1 and len(sync_data['validations']) > 1:
+                # Use cumulative distances (nn-evolution style)
+                cumulative_distances = np.cumsum(sync_data['distances'])
+                
+                # Compute correlation
+                try:
+                    from scipy.stats import pearsonr
+                    correlation, p_value = pearsonr(cumulative_distances, sync_data['validations'])
+                    results['synchronized_correlation'] = correlation
+                    results['correlation_p_value'] = p_value
+                except ImportError:
+                    correlation = np.corrcoef(cumulative_distances, sync_data['validations'])[0, 1]
+                    results['synchronized_correlation'] = correlation
+                    p_value = None
+                
+                # Also compute with original method for comparison
+                original_correlation = self.homology_tracker.compute_correlation_with_validation(
+                    use_nn_evolution_style=False
+                )
+                results['original_correlation'] = original_correlation
+                
+                # Compute with nn-evolution's exact methodology
+                nn_evolution_correlation = self.homology_tracker.compute_correlation_with_validation(
+                    use_nn_evolution_style=True
+                )
+                results['nn_evolution_correlation'] = nn_evolution_correlation
+            else:
+                results['synchronized_correlation'] = 0.0
+                correlation = 0.0
+                p_value = None
+                results['original_correlation'] = 0.0
+            
+            print(f"\n🔬 Homology tracking complete:")
+            print(f"  📈 Total homology computations: {homology_stats['num_snapshots']}")
+            print(f"  🎯 Synchronized measurements: {len(sync_data['distances'])}")
+            print(f"  📊 Tracking mode: {self.track_mode} (every {self.validation_interval} {self.track_mode}s)")
+            print(f"  🔗 Perfect alignment correlation: {results.get('synchronized_correlation', 0.0):.4f}")
+            print(f"  🔬 nn-evolution style correlation: {results.get('nn_evolution_correlation', 0.0):.4f}")
+            print(f"  📊 Original correlation: {results.get('original_correlation', 0.0):.4f}")
+            if p_value is not None:
+                print(f"  📊 P-value: {p_value:.6f}")
+            print(f"  ⏱️  Average computation time: {homology_stats['average_computation_time']:.2f}s")
         
         print(f"\nTraining completed in {total_time:.2f} seconds")
         
@@ -425,25 +634,51 @@ class TrainerWithHomology:
             self.homology_tracker.save_results(homology_dir)
             print(f"Homology results saved to {homology_dir}")
             
-            # Create network visualization
-            from src.visualization.network_graph_viz import NetworkGraphVisualizer
-            visualizer = NetworkGraphVisualizer()
+            # Create network visualizations based on configuration
+            viz_config = self.homology_config.get('network_homology', {}).get('visualization', {})
+            viz_enabled = bool(viz_config.get('enabled', True))
             
-            # Static visualization
-            static_path = homology_dir / "network_graph.png"
-            visualizer.visualize_network(
-                self.model, 
-                method='static',
-                save_path=str(static_path)
-            )
-            
-            # Interactive visualization
-            interactive_path = homology_dir / "network_graph.html"
-            visualizer.visualize_network(
-                self.model,
-                method='interactive',
-                save_path=str(interactive_path)
-            )
+            if viz_enabled:
+                from src.visualization.network_graph_viz import NetworkGraphVisualizer
+                visualizer = NetworkGraphVisualizer()
+                
+                # Static visualization
+                create_static = bool(viz_config.get('create_static_graph', True))
+                if create_static:
+                    static_format = str(viz_config.get('static_format', 'png'))
+                    static_dpi = int(viz_config.get('static_dpi', 300))
+                    static_path = homology_dir / f"network_graph.{static_format}"
+                    
+                    print(f"Creating static graph visualization: {static_path}")
+                    # Set matplotlib DPI for static visualization
+                    import matplotlib.pyplot as plt
+                    original_dpi = plt.rcParams.get('figure.dpi', 100)
+                    plt.rcParams['figure.dpi'] = static_dpi
+                    
+                    try:
+                        visualizer.visualize_network(
+                            self.model, 
+                            method='static',
+                            save_path=str(static_path)
+                        )
+                    finally:
+                        # Restore original DPI
+                        plt.rcParams['figure.dpi'] = original_dpi
+                
+                # Interactive visualization
+                create_interactive = bool(viz_config.get('create_interactive_graph', True))
+                if create_interactive:
+                    interactive_format = str(viz_config.get('interactive_format', 'html'))
+                    interactive_path = homology_dir / f"network_graph.{interactive_format}"
+                    
+                    print(f"Creating interactive graph visualization: {interactive_path}")
+                    visualizer.visualize_network(
+                        self.model,
+                        method='interactive',
+                        save_path=str(interactive_path)
+                    )
+            else:
+                print("Network visualization disabled in configuration")
 
 
 def train_with_homology(training_config_path: str, 

@@ -243,19 +243,25 @@ class PersistenceDistanceCalculator:
         deaths = diagram[:, 1]
         persistences = deaths - births
         
-        # Create sampling grid
-        b_min, b_max = births.min(), births.max()
-        p_min, p_max = 0, persistences.max()
+        # Use a fixed grid approach that always produces num_samples points
+        # This ensures consistency between different diagrams
         
-        # Add margins
-        b_margin = 0.1 * (b_max - b_min) if b_max > b_min else 1.0
-        p_margin = 0.1 * p_max if p_max > 0 else 1.0
+        # For consistency, use a canonical range that works for all diagrams
+        # in a comparison (avoid dependence on individual diagram ranges)
+        b_min_global = min(0, births.min())
+        b_max_global = max(1, births.max())
+        p_max_global = max(1, persistences.max())
         
-        b_samples = np.linspace(b_min - b_margin, b_max + b_margin, int(np.sqrt(num_samples)))
-        p_samples = np.linspace(p_min, p_max + p_margin, int(np.sqrt(num_samples)))
+        # Create uniform sampling grid
+        grid_size = int(np.sqrt(num_samples))
+        actual_num_samples = grid_size * grid_size  # This ensures consistency
+        
+        b_samples = np.linspace(b_min_global, b_max_global, grid_size)
+        p_samples = np.linspace(0, p_max_global, grid_size)
         
         # Compute heat kernel values
-        signature = []
+        signature = np.zeros(actual_num_samples)
+        idx = 0
         for b in b_samples:
             for p in p_samples:
                 # Heat kernel centered at (b, p)
@@ -264,9 +270,29 @@ class PersistenceDistanceCalculator:
                     birth_dist = (births[i] - b) ** 2
                     pers_dist = (persistences[i] - p) ** 2
                     kernel_sum += np.exp(-(birth_dist + pers_dist) / (2 * sigma ** 2))
-                signature.append(kernel_sum)
+                signature[idx] = kernel_sum
+                idx += 1
         
-        return np.array(signature) / len(diagram) if len(diagram) > 0 else np.array(signature)
+        # Normalize and ensure exactly num_samples elements
+        signature = signature / len(diagram) if len(diagram) > 0 else signature
+        
+        # Resize to exactly num_samples if needed
+        if len(signature) != num_samples:
+            # Interpolate to get exactly num_samples points
+            from scipy.interpolate import interp1d
+            try:
+                x_old = np.linspace(0, 1, len(signature))
+                x_new = np.linspace(0, 1, num_samples)
+                f = interp1d(x_old, signature, kind='linear', fill_value='extrapolate')
+                signature = f(x_new)
+            except ImportError:
+                # Fallback: simple resize
+                if len(signature) < num_samples:
+                    signature = np.pad(signature, (0, num_samples - len(signature)), 'constant')
+                else:
+                    signature = signature[:num_samples]
+        
+        return signature
     
     def silhouette_distance(self, diagram1: np.ndarray, diagram2: np.ndarray,
                           power: float = 1.0, resolution: int = 100) -> float:

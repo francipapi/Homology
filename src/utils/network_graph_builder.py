@@ -37,7 +37,7 @@ class NetworkGraphBuilder(ABC):
     def __init__(self, normalize_weights: bool = True, 
                  weight_threshold: float = 1e-6,
                  handle_negative_weights: bool = True,
-                 weight_encoding: str = 'standard',
+                 weight_encoding: str = 'reverse',
                  min_edge_distance: float = 1e-6,
                  normalization_type: str = 'standard'):
         """
@@ -100,7 +100,11 @@ class NetworkGraphBuilder(ABC):
     def _add_edge_with_sign(self, g: Graph, u: int, v: int, weight: float, 
                            e_weight: Any) -> None:
         """
-        Add edge respecting sign convention based on weight_encoding method.
+        Add edge for MLP layers respecting sign convention.
+        
+        Note: This method is ONLY for direct neuron-to-neuron connections in MLPs.
+        For convolutional layers, the factor graph approach uses structural edges
+        with weight 1.0 and encodes the actual weights as self-loops on parameter nodes.
         
         Args:
             g: Graph object
@@ -112,29 +116,22 @@ class NetworkGraphBuilder(ABC):
         if self.weight_encoding == 'standard':
             # Standard encoding: keep original direction and weight
             e = g.add_edge(u, v)
-            e_weight[e] = weight  # Keep original sign
+            e_weight[e] = abs(weight)  # Use absolute value for edge weight
         elif self.weight_encoding == 'reverse':
             # Reverse encoding: negative weights reverse direction
             if weight < 0:
                 e = g.add_edge(v, u)
-                # Use nn-similarity formula: 1 - |w|/max_weight
-                if self.max_abs_weight is not None and self.max_abs_weight > 0:
-                    e_weight[e] = max(1 - abs(weight) / self.max_abs_weight, self.min_edge_distance)
-                else:
-                    e_weight[e] = abs(weight)
+                e_weight[e] = abs(weight)
             else:
                 e = g.add_edge(u, v)
-                if self.max_abs_weight is not None and self.max_abs_weight > 0:
-                    e_weight[e] = max(1 - abs(weight) / self.max_abs_weight, self.min_edge_distance)
-                else:
-                    e_weight[e] = weight
+                e_weight[e] = weight
         elif self.weight_encoding == 'mirror':
             # Mirror encoding handled separately in MLPGraphBuilder
             # This should not be called directly for mirror encoding
             raise ValueError("Mirror encoding requires special handling in build_graph")
         else:
-            # Fallback to legacy behavior
-            if self.handle_negative_weights and weight < 0:
+            # Default behavior: reverse edges for negative weights
+            if weight < 0:
                 e = g.add_edge(v, u)
                 e_weight[e] = abs(weight)
             else:
@@ -149,7 +146,7 @@ class NetworkGraphBuilder(ABC):
         Args:
             g: Graph object
             e_weight: Edge weight property map
-            normalization_type: 'standard' (divide by max) or 'nn_similarity' (distance-based)
+            normalization_type: 'standard' (divide by max), 'nn_similarity' (distance-based), or 'nn_evolution'
         """
         if not self.normalize_weights:
             return
@@ -165,6 +162,29 @@ class NetworkGraphBuilder(ABC):
             if max_abs > 0:
                 # Convert weights to distances
                 e_weight.a = self.min_edge_distance + max_abs - np.abs(weights)
+        elif normalization_type == 'nn_evolution':
+            # nn-evolution normalization: convert to distances with specific formula
+            # distance = max(1 - |weight|/max_abs_weight, min_edge_distance)
+            # This is specifically for the 'reverse' weight encoding method
+            if self.weight_encoding != 'reverse':
+                print(f"Warning: nn_evolution normalization is designed for 'reverse' weight encoding, "
+                      f"but current encoding is '{self.weight_encoding}'")
+            
+            # Use precomputed max_abs_weight if available (from UnifiedGraphBuilder)
+            if hasattr(self, 'max_abs_weight') and self.max_abs_weight is not None:
+                max_abs = self.max_abs_weight
+            else:
+                max_abs = np.max(np.abs(weights)) if len(weights) > 0 else 1.0
+            
+            if max_abs > 0:
+                # Apply nn-evolution formula
+                e_weight.a = np.maximum(
+                    1.0 - np.abs(weights) / max_abs,
+                    self.min_edge_distance
+                )
+            else:
+                # If all weights are zero, set to min distance
+                e_weight.a = np.full_like(weights, self.min_edge_distance)
         else:
             # Standard normalization: divide by max
             max_weight = np.max(weights)
@@ -239,12 +259,12 @@ class MLPGraphBuilder(NetworkGraphBuilder):
             if len(input_vertices) != in_features:
                 raise ValueError(f"Mismatch: prev_vertices has {len(input_vertices)} vertices but layer expects {in_features} inputs")
             
-        # Create output vertices
+        # Create output vertices (these are actually hidden layer nodes in most cases)
         output_vertices = []
         output_vertices_mirror = []
         for i in range(out_features):
             v = g.add_vertex()
-            v_type[v] = "hidden"
+            v_type[v] = "hidden"  # These will be marked as "output" only for final layer by UnifiedGraphBuilder
             v_layer[v] = 1
             g.vp.neuron_idx[v] = i
             output_vertices.append(v)
@@ -286,6 +306,7 @@ class MLPGraphBuilder(NetworkGraphBuilder):
                     if abs(weight) < self.weight_threshold:
                         continue
                         
+                    # Use edge reversal for negative weights in MLP (direct connections)
                     self._add_edge_with_sign(g, input_vertices[j], output_vertices[i], 
                                            weight, e_weight)
         
@@ -293,7 +314,7 @@ class MLPGraphBuilder(NetworkGraphBuilder):
         if layer.bias is not None:
             bias = layer.bias.detach().cpu().numpy()
             bias_vertex = g.add_vertex()
-            v_type[bias_vertex] = "bias"
+            v_type[bias_vertex] = "bias"  # Keep "bias" for MLP (direct connection)
             v_layer[bias_vertex] = 0
             g.vp.neuron_idx[bias_vertex] = -1
             
@@ -315,6 +336,7 @@ class MLPGraphBuilder(NetworkGraphBuilder):
             else:
                 for i in range(out_features):
                     if abs(bias[i]) >= self.weight_threshold:
+                        # Use edge reversal for negative bias in MLP
                         self._add_edge_with_sign(g, bias_vertex, output_vertices[i], 
                                                bias[i], e_weight)
         
@@ -337,8 +359,13 @@ class ConvGraphBuilder(NetworkGraphBuilder):
     - Parameter nodes: One per unique kernel weight (factor nodes)
     - Output activation nodes: One per output spatial position and channel
     
-    Weight sharing is handled by having all spatial positions connect through
-    the same parameter nodes.
+    Key principles:
+    1. Weight sharing is handled by having all spatial positions connect through
+       the same parameter nodes.
+    2. The actual weight values are encoded as self-loops on parameter nodes.
+    3. Structural edges (input->param, param->output) always have weight 1.0
+       and are NEVER reversed, regardless of the sign of the actual weight.
+    4. Self-loops are ONLY placed on parameter nodes, never on input/output nodes.
     """
     
     def __init__(self, *args, include_spatial_info: bool = True, **kwargs):
@@ -408,31 +435,18 @@ class ConvGraphBuilder(NetworkGraphBuilder):
         # Step 1: Create or map input activation vertices
         input_vertices = {}  # (h, w, c) -> vertex
         
-        if prev_vertices is None:
-            # First conv layer - create input vertices
-            for h in range(H_in):
-                for w in range(W_in):
-                    for c in range(C_in):
-                        v = g.add_vertex()
-                        v_type[v] = "input"
-                        v_layer[v] = 0
-                        g.vp.neuron_idx[v] = c + C_in * (w + W_in * h)
-                        if self.include_spatial_info:
-                            g.vp.spatial_h[v] = h
-                            g.vp.spatial_w[v] = w
-                        input_vertices[(h, w, c)] = v
-        else:
-            # Middle layer - map prev_vertices to spatial positions
-            # prev_vertices should be in order: [(h=0,w=0,c=0), (h=0,w=0,c=1), ..., (h=0,w=0,c=C_in-1), (h=0,w=1,c=0), ...]
-            if len(prev_vertices) != H_in * W_in * C_in:
-                raise ValueError(f"Expected {H_in * W_in * C_in} prev_vertices, got {len(prev_vertices)}")
-            
-            idx = 0
-            for h in range(H_in):
-                for w in range(W_in):
-                    for c in range(C_in):
-                        input_vertices[(h, w, c)] = prev_vertices[idx]
-                        idx += 1
+        # First conv layer - create input vertices
+        for h in range(H_in):
+            for w in range(W_in):
+                for c in range(C_in):
+                    v = g.add_vertex()
+                    v_type[v] = "input"
+                    v_layer[v] = 0
+                    g.vp.neuron_idx[v] = c + C_in * (w + W_in * h)
+                    if self.include_spatial_info:
+                        g.vp.spatial_h[v] = h
+                        g.vp.spatial_w[v] = w
+                    input_vertices[(h, w, c)] = v
         
         # Step 2: Create parameter nodes (factor nodes)
         param_vertices = {}  # (k_h, k_w, c_in, c_out) -> vertex
@@ -493,16 +507,17 @@ class ConvGraphBuilder(NetworkGraphBuilder):
                                     # Check weight magnitude
                                     weight_val = weights[c_out, c_in, kh, kw]
                                     if abs(weight_val) >= self.weight_threshold:
-                                        # Add structural edges
+                                        # Add structural edges with weight 1.0
+                                        # These edges represent the structure of the computation
+                                        # and should NOT have their direction reversed
+                                        
                                         # Input -> Parameter (always forward)
                                         e1 = g.add_edge(input_v, param_v)
                                         e_weight[e1] = 1.0
                                         
-                                        # Parameter -> Output (direction depends on sign)
-                                        if self.handle_negative_weights and weight_val < 0:
-                                            e2 = g.add_edge(output_v, param_v)
-                                        else:
-                                            e2 = g.add_edge(param_v, output_v)
+                                        # Parameter -> Output (always forward)
+                                        # The sign of the weight is encoded in the self-loop on the parameter
+                                        e2 = g.add_edge(param_v, output_v)
                                         e_weight[e2] = 1.0
         
         # Handle bias if present
@@ -510,24 +525,22 @@ class ConvGraphBuilder(NetworkGraphBuilder):
             bias = layer.bias.detach().cpu().numpy()
             for c_out in range(out_channels):
                 if abs(bias[c_out]) >= self.weight_threshold:
-                    # Create bias parameter node
+                    # Create bias parameter node (consistent naming)
                     bias_v = g.add_vertex()
-                    v_type[bias_v] = "bias_parameter"
+                    v_type[bias_v] = "parameter"  # Use consistent type for all parameters
                     v_layer[bias_v] = 1
-                    g.vp.neuron_idx[bias_v] = -1 - c_out
+                    g.vp.neuron_idx[bias_v] = -1 - c_out  # Negative to distinguish from regular params
                     
-                    # Self-loop with bias magnitude
+                    # Self-loop with bias magnitude (sign preserved)
                     e = g.add_edge(bias_v, bias_v)
                     e_weight[e] = abs(bias[c_out])
                     
                     # Connect to all output positions for this channel
+                    # Structural edges always forward (bias -> output)
                     for h in range(H_out):
                         for w in range(W_out):
                             output_v = output_vertices[(h, w, c_out)]
-                            if self.handle_negative_weights and bias[c_out] < 0:
-                                e = g.add_edge(output_v, bias_v)
-                            else:
-                                e = g.add_edge(bias_v, output_v)
+                            e = g.add_edge(bias_v, output_v)
                             e_weight[e] = 1.0
         
         # Normalize weights if requested
@@ -675,16 +688,17 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
                     current_shape = (np.prod(current_shape),)
                     layer_idx += 1
                 
-                # Use MLPGraphBuilder for proper encoding support
-                mlp_g, mlp_outputs = self.mlp_builder.build_graph(
-                    module, current_shape, current_vertices
-                )
-                
-                # Merge into main graph if not the first layer
+                # Build layer directly in main graph if not first layer
                 if current_vertices is not None:
-                    current_vertices = self._merge_subgraph(g, mlp_g, layer_idx)
+                    # Add layer directly to main graph using previous vertices as input
+                    current_vertices = self._add_linear_layer(
+                        g, module, current_vertices, current_shape, layer_idx
+                    )
                 else:
-                    # First layer - just use the mlp graph
+                    # First layer - use MLPGraphBuilder to create initial graph
+                    mlp_g, mlp_outputs = self.mlp_builder.build_graph(
+                        module, current_shape, current_vertices
+                    )
                     g = mlp_g
                     current_vertices = mlp_outputs
                     v_type = g.vp.type
@@ -697,7 +711,7 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
                 # Handle Convolutional layers
                 # For now, always create new graph and merge
                 conv_g, conv_outputs = self.conv_builder.build_graph(
-                    module, current_shape, None  # Don't pass prev_vertices to avoid issues
+                    module, current_shape, current_vertices
                 )
                 
                 # Merge into main graph
@@ -802,7 +816,8 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
             main_graph.vp.layer[new_v] += layer_offset
             
             # Track output vertices
-            if subgraph.vp.type[v] == "output":
+            if subgraph.vp.type[v] == "hidden" and subgraph.vp.layer[v] == 1:
+                # For MLPGraphBuilder, layer 1 vertices are the layer outputs
                 output_vertices.append(new_v)
         
         # Copy edges
@@ -893,7 +908,7 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
                 v = g.add_vertex()
                 v_type[v] = "input"
                 v_layer[v] = layer_idx
-                g.vp.neuron_idx[v] = i
+                g.vertex_properties["neuron_idx"][v] = i
                 input_vertices.append(v)
         else:
             input_vertices = prev_vertices
@@ -904,7 +919,7 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
             v = g.add_vertex()
             v_type[v] = "hidden" if layer_idx > 0 else "output"
             v_layer[v] = layer_idx + 1
-            g.vp.neuron_idx[v] = i
+            g.vertex_properties["neuron_idx"][v] = i
             output_vertices.append(v)
         
         # Add edges with weights
@@ -916,6 +931,7 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
                 if abs(weight) < self.weight_threshold:
                     continue
                     
+                # Use edge reversal for negative weights in MLP layers
                 self._add_edge_with_sign(g, input_vertices[j], output_vertices[i], 
                                        weight, e_weight)
         
@@ -925,10 +941,11 @@ class UnifiedGraphBuilder(NetworkGraphBuilder):
             bias_vertex = g.add_vertex()
             v_type[bias_vertex] = "bias"
             v_layer[bias_vertex] = layer_idx
-            g.vp.neuron_idx[bias_vertex] = -1
+            g.vertex_properties["neuron_idx"][bias_vertex] = -1
             
             for i in range(out_features):
                 if abs(bias[i]) >= self.weight_threshold:
+                    # Use edge reversal for negative bias in MLP layers
                     self._add_edge_with_sign(g, bias_vertex, output_vertices[i], 
                                            bias[i], e_weight)
         

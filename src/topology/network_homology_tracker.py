@@ -198,22 +198,35 @@ class NetworkHomologyTracker:
         
         self.config = config
         
-        # Extract key parameters
-        graph_config = config.get('graph_construction', {})
-        self.normalize_weights = graph_config.get('normalize_weights', True)
-        self.weight_threshold = graph_config.get('weight_threshold', 1e-6)
-        self.handle_negative_weights = graph_config.get('handle_negative_weights', True)
-        self.weight_encoding = graph_config.get('weight_encoding', 'standard')
-        self.min_edge_distance = graph_config.get('min_edge_distance', 1e-6)
-        self.normalization_type = graph_config.get('normalization_type', 'standard')
+        # Extract key parameters from network_homology section
+        network_config = config.get('network_homology', {})
+        graph_config = network_config.get('graph_construction', {})
+        self.normalize_weights = bool(graph_config.get('normalize_weights', True))
+        self.weight_threshold = float(graph_config.get('weight_threshold', 1e-6))
+        # handle_negative_weights is deprecated but still needed for compatibility
+        self.handle_negative_weights = bool(graph_config.get('handle_negative_weights', False))
+        self.weight_encoding = str(graph_config.get('weight_encoding', 'standard'))
+        self.min_edge_distance = float(graph_config.get('min_edge_distance', 1e-6))
+        self.normalization_type = str(graph_config.get('normalization_type', 'standard'))
         
-        complex_config = config.get('simplicial_complex', {})
-        self.max_dimension = complex_config.get('max_dimension', 2)
-        self.max_edge_length = complex_config.get('max_edge_length', 1.0)
-        self.backend = complex_config.get('backend', 'auto')
+        complex_config = network_config.get('simplicial_complex', {})
+        self.max_dimension = int(complex_config.get('max_dimension', 2))
+        self.max_edge_length = float(complex_config.get('max_edge_length', 1.0))
+        self.backend = str(complex_config.get('backend', 'auto'))
         
-        persistence_config = config.get('persistence', {})
-        self.distance_metric = config.get('distance_metrics', {}).get('primary_metric', 'wasserstein')
+        # nn-evolution specific parameters
+        geodesic_config = network_config.get('geodesic_distance', {})
+        self.use_geodesic_distance = bool(geodesic_config.get('enabled', False))
+        
+        persistence_config = network_config.get('persistence', {})
+        epsilon_raw = persistence_config.get('epsilon_filtering', None)
+        self.epsilon_filtering = float(epsilon_raw) if epsilon_raw is not None else None
+        self.distance_metric = str(network_config.get('distance_metrics', {}).get('primary_metric', 'heat'))
+        
+        # Memory optimization parameters
+        tracking_config = network_config.get('tracking', {})
+        self.incremental_only = bool(tracking_config.get('incremental_only', False))
+        self.store_full_diagrams = bool(tracking_config.get('store_full_diagrams', True))
         
         # Initialize components
         self.graph_builder = UnifiedGraphBuilder(
@@ -228,7 +241,9 @@ class NetworkHomologyTracker:
         self.complex_builder = DirectedFlagComplex(
             max_dimension=self.max_dimension,
             max_edge_length=self.max_edge_length,
-            backend=self.backend
+            backend=self.backend,
+            use_geodesic_distance=self.use_geodesic_distance,
+            epsilon_filtering=self.epsilon_filtering
         )
         
         # Initialize history
@@ -237,6 +252,10 @@ class NetworkHomologyTracker:
         # Cache for graph structure (only weights change during training)
         self.cached_graph_structure = None
         self.cached_model_architecture = None
+        
+        # Memory optimization: only store previous state for incremental tracking
+        self.previous_persistence_diagrams = None
+        self.previous_graph_state = None
         
     def _load_default_config(self) -> Dict[str, Any]:
         """Load default configuration from file."""
@@ -247,18 +266,39 @@ class NetworkHomologyTracker:
         else:
             # Return minimal default config
             return {
-                "graph_construction": {
-                    "normalize_weights": True,
-                    "weight_threshold": 1e-6,
-                    "handle_negative_weights": True
-                },
-                "simplicial_complex": {
-                    "max_dimension": 2,
-                    "max_edge_length": 1.0,
-                    "backend": "auto"
-                },
-                "distance_metrics": {
-                    "primary_metric": "wasserstein"
+                "network_homology": {
+                    "enabled": True,
+                    "alignment": {
+                        "mode": "step",
+                        "validation_interval": 50
+                    },
+                    "graph_construction": {
+                        "normalize_weights": True,
+                        "weight_threshold": 1e-6,
+                        "weight_encoding": "reverse",
+                        "normalization_type": "nn_evolution"
+                    },
+                    "simplicial_complex": {
+                        "max_dimension": 2,
+                        "max_edge_length": 1.0,
+                        "backend": "flagser"
+                    },
+                    "distance_metrics": {
+                        "primary_metric": "heat",
+                        "heat_sigma": 0.1
+                    },
+                    "tracking": {
+                        "incremental_only": True,
+                        "store_full_diagrams": False
+                    },
+                    "visualization": {
+                        "enabled": True,
+                        "create_static_graph": True,
+                        "create_interactive_graph": True,
+                        "static_format": "png",
+                        "static_dpi": 300,
+                        "interactive_format": "html"
+                    }
                 }
             }
     
@@ -287,12 +327,14 @@ class NetworkHomologyTracker:
         # Build network graph
         graph = self._build_network_graph(model)
         
-        # Compute homology
+        # Compute homology with nn-evolution style processing
         homology_result = compute_network_homology(
             graph,
             max_dimension=self.max_dimension,
             max_edge_length=self.max_edge_length,
-            backend=self.backend
+            backend=self.backend,
+            use_geodesic_distance=self.use_geodesic_distance,
+            epsilon_filtering=self.epsilon_filtering
         )
         
         # Extract results
@@ -301,13 +343,21 @@ class NetworkHomologyTracker:
         
         # Compute distance from previous snapshot
         distance_from_previous = None
-        previous_snapshot = self.history.get_latest_snapshot()
         
-        if previous_snapshot is not None:
+        # For incremental tracking, use cached previous state
+        if self.incremental_only and self.previous_persistence_diagrams is not None:
             distance_from_previous = self._compute_distance(
                 persistence_diagrams,
-                previous_snapshot.persistence_diagrams
+                self.previous_persistence_diagrams
             )
+        elif not self.incremental_only:
+            # Original behavior: compare with last snapshot in history
+            previous_snapshot = self.history.get_latest_snapshot()
+            if previous_snapshot is not None:
+                distance_from_previous = self._compute_distance(
+                    persistence_diagrams,
+                    previous_snapshot.persistence_diagrams
+                )
         
         # Create snapshot
         computation_time = time.time() - start_time
@@ -324,8 +374,30 @@ class NetworkHomologyTracker:
             computation_time=computation_time
         )
         
-        # Add to history
-        self.history.add_snapshot(snapshot)
+        # Memory optimization: decide what to store
+        if self.store_full_diagrams:
+            # Store full snapshot in history
+            self.history.add_snapshot(snapshot)
+        else:
+            # Only store metrics, not full diagrams
+            lightweight_snapshot = HomologySnapshot(
+                step=step,
+                epoch=epoch,
+                batch_idx=batch_idx,
+                timestamp=snapshot.timestamp,
+                betti_numbers=betti_numbers,
+                persistence_diagrams={},  # Empty to save memory
+                distance_from_previous=distance_from_previous,
+                validation_accuracy=validation_accuracy,
+                train_loss=train_loss,
+                computation_time=computation_time
+            )
+            self.history.add_snapshot(lightweight_snapshot)
+        
+        # Update cached previous state for incremental tracking
+        if self.incremental_only:
+            self.previous_persistence_diagrams = persistence_diagrams
+            self.previous_graph_state = graph
         
         # Update metadata if first snapshot
         if len(self.history.snapshots) == 1:
@@ -373,7 +445,7 @@ class NetworkHomologyTracker:
         from src.analysis.persistence_distances import compute_all_distances
         
         # Get distance metric from config
-        distance_config = self.config.get('distance_metrics', {})
+        distance_config = self.config.get('network_homology', {}).get('distance_metrics', {})
         primary_metric = distance_config.get('primary_metric', 'heat')
         
         # Metric-specific parameters
@@ -393,39 +465,92 @@ class NetworkHomologyTracker:
         
         return distances[primary_metric]
     
-    def compute_correlation_with_validation(self, window_size: Optional[int] = None) -> float:
+    def compute_correlation_with_validation(self, window_size: Optional[int] = None, 
+                                          use_cumulative: bool = None,
+                                          use_nn_evolution_style: bool = None) -> float:
         """
         Compute correlation between homology distance and validation accuracy.
         
+        Following nn-evolution methodology EXACTLY:
+        1. Use CUMULATIVE distances (total topological change)
+        2. Use RAW validation accuracy (not cumulative)
+        3. Downsample to 20 points for correlation computation
+        4. Pearson correlation coefficient
+        
         Args:
             window_size: Size of sliding window (None for all data)
+            use_cumulative: Whether to use cumulative distances (nn-evolution style)
+            use_nn_evolution_style: Whether to use nn-evolution's exact methodology
             
         Returns:
             Correlation coefficient
         """
-        distances = self.history.get_distance_evolution()
-        validations = self.history.get_validation_evolution()
+        raw_distances = self.history.get_distance_evolution()
+        raw_validations = self.history.get_validation_evolution()
         
-        if len(distances) < 2 or len(validations) < 2:
+        if len(raw_distances) < 2 or len(raw_validations) < 2:
             return 0.0
         
-        # Align arrays - ensure they have the same length
-        min_len = min(len(distances), len(validations))
-        if min_len < 2:
-            return 0.0
+        # Get configuration values if not provided
+        if use_cumulative is None:
+            use_cumulative = self.config.get('network_homology', {}).get('correlation_analysis', {}).get('use_cumulative_distances', True)
+        if use_nn_evolution_style is None:
+            use_nn_evolution_style = self.config.get('network_homology', {}).get('correlation_analysis', {}).get('use_nn_evolution_correlation', True)
+        
+        # nn-evolution methodology: CUMULATIVE distances with RAW validation accuracy
+        if use_cumulative:
+            distances = np.cumsum(raw_distances)
+        else:
+            distances = raw_distances
             
-        distances = distances[:min_len]
-        validations = validations[:min_len]
+        # CRITICAL: Keep validation accuracy as RAW values (nn-evolution approach)
+        validations = raw_validations  # Do NOT make cumulative
+        
+        # nn-evolution style downsampling to 20 points
+        if use_nn_evolution_style and len(distances) > 20:
+            # Downsample distances to 20 points exactly like nn-evolution
+            indices = np.arange(1, len(distances) + 1, len(distances) / 20, dtype=int)
+            distances = distances[indices]
+            
+            # Ensure validations match the downsampled distances
+            if len(validations) >= len(indices):
+                validations = validations[indices]
+            else:
+                # Truncate to minimum length
+                min_len = min(len(distances), len(validations))
+                distances = distances[:min_len]
+                validations = validations[:min_len]
+        else:
+            # Handle temporal alignment for non-nn-evolution style
+            if len(distances) != len(validations):
+                # If we have more distance measurements than validation measurements,
+                # downsample distances to match validation frequency
+                if len(distances) > len(validations):
+                    # Downsample distances to match validation points
+                    indices = np.linspace(0, len(distances) - 1, len(validations), dtype=int)
+                    distances = distances[indices]
+                else:
+                    # If we have more validation measurements, truncate
+                    min_len = min(len(distances), len(validations))
+                    distances = distances[:min_len]
+                    validations = validations[:min_len]
         
         # Apply window if specified
         if window_size is not None and window_size < len(distances):
             distances = distances[-window_size:]
             validations = validations[-window_size:]
         
-        # Compute correlation
-        if len(distances) > 0 and len(validations) > 0:
-            correlation = np.corrcoef(distances, validations)[0, 1]
-            return float(correlation) if not np.isnan(correlation) else 0.0
+        # Compute correlation (Pearson correlation coefficient)
+        if len(distances) > 1 and len(validations) > 1:
+            # Use scipy.stats.pearsonr for consistency with nn-evolution
+            try:
+                from scipy.stats import pearsonr
+                correlation, p_value = pearsonr(distances, validations)
+                return float(correlation) if not np.isnan(correlation) else 0.0
+            except ImportError:
+                # Fallback to numpy if scipy not available
+                correlation = np.corrcoef(distances, validations)[0, 1]
+                return float(correlation) if not np.isnan(correlation) else 0.0
         
         return 0.0
     

@@ -3,7 +3,7 @@ model:
   input_dim: 3  # Set to 3 for torus data
   # hidden_dims: [32, 64, 32] # Removed as per new requirements
   num_hidden_layers: 8  # Fixed to 8 layers
-  hidden_dim: 32  # Fixed to 32 neurons
+  hidden_dim: 32 # Fixed to 32 neurons
   output_dim: 1  # Binary classification
   activation_fn_name: 'relu'
   output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
@@ -13,7 +13,7 @@ model:
 training:
   # General training settings
   device: 'cpu'       # cpu, cuda or mps
-  epochs: 2 # Temporarily reduced for testing
+  epochs: 20 # Temporarily reduced for testing
   batch_size: 64    # Increased batch size for MPS
   learning_rate: 0.0015  # Reduced learning rate
   seed: 42            # Random seed for reproducibility
