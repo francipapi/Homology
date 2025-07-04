@@ -159,3 +159,5 @@ temp/
 
 # Conda environment files
 environment.yml.lock
+
+nn-evolution/

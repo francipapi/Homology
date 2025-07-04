@@ -43,6 +43,11 @@ network_homology:
                                        # - "nn_similarity": Distance formula from nn-similarity paper
                                        # - "nn_evolution": Formula from nn-evolution paper (recommended)
     
+    consistent_normalization: true  # Options: true, false
+                                   # - true: Use global max_abs_weight across all models (prevents RAM explosion)
+                                   # - false: Use per-model max_abs_weight (standard nn-evolution behavior)
+                                   # Use true for stable network comparison, false for tracking single models
+    
     min_edge_distance: 0.000001  # Minimum edge distance for normalization
                                      # Prevents division by zero in distance calculations
                                      # Common values: 0.000001, 0.00001
@@ -94,9 +99,10 @@ network_homology:
                     # - "gudhi": Force GUDHI for persistence computation
                     # - "flagser": Force Flagser for persistence computation
     
-    epsilon_filtering: 0.6  # Filter edges with distance > epsilon (nn-evolution compatibility)
-                           # Common values: 0.5, 0.6, 0.7
-                           # Lower = more restrictive filtering
+    epsilon_filtering: null  # Filter edges with distance > epsilon (nn-evolution compatibility)
+                            # Common values: null (disabled), 1.5, 1.0, 0.8
+                            # Lower = more restrictive filtering (0.6)
+                            # Use null to disable filtering for network comparison
     
     max_edge_weight: 1.0  # Maximum edge weight constraint
                          # Used to replace infinite persistence values
@@ -190,3 +196,116 @@ network_homology:
                                     # - "csv": Human-readable, works with Excel/pandas
                                     # - "json": Structured text format
                                     # - "pickle": Python binary format (smallest file size)
+  
+  # Network comparison settings
+  comparison:
+    enabled: true  # Options: true, false
+                  # - true: Enable network comparison functionality
+                  # - false: Disable comparison features
+    
+    models_dir: "results/homology_training"  # Directory containing model.pt files
+                                           # Can be absolute or relative path
+    
+    output_dir: "results/network_homology_comparison"  # Output directory for comparison results
+    
+    # Distance metrics to compute
+    metrics:  # List of metrics to compute for pairwise comparisons
+      - "heat"        # Heat kernel distance (fast, good for correlation)
+      - "wasserstein" # Wasserstein distance (accurate, slower)
+      - "bottleneck"  # Bottleneck distance (robust to outliers)
+    
+    # Metric-specific parameters (uses defaults from distance_metrics section if not specified)
+    metric_params:
+      heat_sigma: 0.1  # Override heat kernel bandwidth for comparison
+      wasserstein_p: 2.0  # Wasserstein parameter (1 or 2)
+      wasserstein_delta: 0.01  # Diagonal weight parameter
+    
+    # Comparison parameters
+    max_models: null  # Maximum number of models to compare (null = all)
+                     # Useful for limiting computation time during testing
+                     # Common values: 10, 20, 50, null
+    
+    model_filter: "model.pt"  # File pattern for model files
+                             # Examples: "model.pt", "*.pt", "mlp_*.pt"
+    
+    # Batch processing for memory efficiency
+    batch_size: 50  # Process models in batches to save memory
+                   # Lower values = less memory usage, more disk I/O
+                   # Common values: 10, 20, 50, 100
+    
+    # Visualization settings
+    visualization:
+      create_heatmap: true  # Options: true, false
+                           # - true: Generate distance matrix heatmap
+                           # - false: Skip heatmap generation
+      
+      heatmap_format: "png"  # Options: "png", "pdf", "svg"
+                            # - "png": Raster image (good for viewing)
+                            # - "pdf": Vector format (good for publications)
+                            # - "svg": Scalable vector (good for web)
+      
+      heatmap_dpi: 300  # Resolution for PNG format
+                       # Common values: 150 (screen), 300 (print), 600 (high-res)
+      
+      heatmap_cmap: "viridis"  # Colormap for heatmap
+                              # Options: "viridis", "plasma", "inferno", "magma", "cividis",
+                              #          "coolwarm", "RdBu_r", "seismic"
+      
+      annotate_heatmap: true  # Options: true, false
+                             # - true: Show distance values in heatmap cells
+                             # - false: Show colors only
+      
+      annotation_format: ".3f"  # Format string for annotations
+                               # Examples: ".3f" (3 decimals), ".2e" (scientific)
+      
+      figsize: [10, 8]  # Figure size in inches [width, height]
+    
+    # Clustering analysis
+    clustering:
+      perform_clustering: true  # Options: true, false
+                               # - true: Perform clustering analysis on distance matrix
+                               # - false: Skip clustering
+      
+      method: "hierarchical"  # Options: "hierarchical", "spectral", "dbscan"
+                             # - "hierarchical": Agglomerative clustering with dendrogram
+                             # - "spectral": Spectral clustering on affinity matrix
+                             # - "dbscan": Density-based clustering
+      
+      linkage: "average"  # For hierarchical clustering
+                         # Options: "single", "complete", "average", "ward"
+      
+      num_clusters: null  # Number of clusters (null = auto-detect using elbow method)
+                         # Common values: 2, 3, 4, 5, null
+      
+      create_dendrogram: true  # Options: true, false (for hierarchical clustering)
+                              # - true: Create dendrogram visualization
+                              # - false: Skip dendrogram
+    
+    # Output formats
+    output:
+      save_distance_matrices: true  # Options: true, false
+                                   # - true: Save computed distance matrices
+                                   # - false: Don't save matrices (visualization only)
+      
+      distance_matrix_format: "npy"  # Options: "npy", "csv", "pickle", "npz"
+                                    # - "npy": NumPy binary format (fast, compact)
+                                    # - "csv": Human-readable text format
+                                    # - "pickle": Python pickle format
+                                    # - "npz": Compressed NumPy format
+      
+      save_metadata: true  # Options: true, false
+                          # - true: Save model metadata and comparison info
+                          # - false: Skip metadata saving
+      
+      metadata_format: "json"  # Options: "json", "yaml", "pickle"
+                              # - "json": Human-readable JSON format
+                              # - "yaml": Human-readable YAML format
+                              # - "pickle": Python pickle format
+      
+      save_persistence_diagrams: false  # Options: true, false
+                                       # - true: Save individual persistence diagrams
+                                       # - false: Only save distance matrices
+      
+      create_summary_report: true  # Options: true, false
+                                  # - true: Generate summary statistics report
+                                  # - false: Skip summary report

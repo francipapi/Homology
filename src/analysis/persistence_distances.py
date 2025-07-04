@@ -139,10 +139,11 @@ class PersistenceDistanceCalculator:
             Wasserstein distance
         """
         if self.backend == "persim" and PERSIM_AVAILABLE:
-            # Persim's wasserstein doesn't accept p parameter, uses L2 by default
+            # Persim doesn't have a direct wasserstein function, use sliced_wasserstein
             if p != 2:
-                warnings.warn(f"Persim only supports L2 Wasserstein distance, requested p={p}")
-            return float(persim.wasserstein(diagram1, diagram2))
+                warnings.warn(f"Persim sliced_wasserstein only supports L2, requested p={p}")
+            # Use sliced Wasserstein as approximation to regular Wasserstein
+            return float(persim.sliced_wasserstein(diagram1, diagram2, M=50))
         elif self.backend == "gudhi" and GUDHI_AVAILABLE:
             return float(gudhi.wasserstein.wasserstein_distance(
                 diagram1, diagram2, order=p, internal_p=p
@@ -178,8 +179,15 @@ class PersistenceDistanceCalculator:
         # Augment cost matrix with diagonal
         augmented_cost = np.zeros((n1 + n2, n1 + n2))
         augmented_cost[:n1, :n2] = cost_matrix
-        augmented_cost[:n1, n2:] = np.diag(diag1)
-        augmented_cost[n1:, :n2] = np.diag(diag2)
+        
+        # Diagonal assignment for points in diagram1 to diagonal
+        augmented_cost[:n1, n2:n1+n2] = np.diag(diag1)
+        
+        # Diagonal assignment for points in diagram2 to diagonal  
+        augmented_cost[n1:n1+n2, :n2] = np.diag(diag2)
+        
+        # Diagonal to diagonal cost is 0
+        augmented_cost[n1:, n2:] = 0
         
         # Solve optimal transport
         row_ind, col_ind = linear_sum_assignment(augmented_cost)
