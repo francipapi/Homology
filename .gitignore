@@ -161,3 +161,5 @@ temp/
 environment.yml.lock
 
 nn-evolution/
+
+data/
