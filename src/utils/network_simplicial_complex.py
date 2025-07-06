@@ -29,10 +29,17 @@ except ImportError:
     GUDHI_AVAILABLE = False
     
 try:
-    import flagser
-    FLAGSER_AVAILABLE = True
+    from pyflagser import flagser_weighted
+    PYFLAGSER_AVAILABLE = True
 except ImportError:
-    FLAGSER_AVAILABLE = False
+    PYFLAGSER_AVAILABLE = False
+
+try:
+    from gtda.homology import FlagserPersistence
+    from gtda.diagrams import Filtering
+    GIOTTO_FLAGSER_AVAILABLE = True
+except ImportError:
+    GIOTTO_FLAGSER_AVAILABLE = False
 
 
 class NetworkSimplicialComplex(ABC):
@@ -58,14 +65,19 @@ class NetworkSimplicialComplex(ABC):
     def _select_backend(self, backend: str) -> str:
         """Select appropriate backend based on availability."""
         if backend == "auto":
-            if FLAGSER_AVAILABLE:
+            if GIOTTO_FLAGSER_AVAILABLE:
                 return "flagser"
             elif GUDHI_AVAILABLE:
                 return "gudhi"
             else:
-                raise ImportError("No backend available. Install flagser or gudhi.")
-        elif backend == "flagser" and not FLAGSER_AVAILABLE:
-            raise ImportError("Flagser not available. Please install it.")
+                raise ImportError("No backend available. Install giotto-tda or gudhi.")
+        elif backend == "flagser":
+            if GIOTTO_FLAGSER_AVAILABLE:
+                return "flagser"
+            elif PYFLAGSER_AVAILABLE:
+                return "flagser_legacy" 
+            else:
+                raise ImportError("Flagser not available. Please install giotto-tda or pyflagser.")
         elif backend == "gudhi" and not GUDHI_AVAILABLE:
             raise ImportError("Gudhi not available. Please install it.")
         return backend
@@ -91,18 +103,21 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
     """
     
     def __init__(self, *args, use_geodesic_distance: bool = False, 
-                 epsilon_filtering: Optional[float] = None, **kwargs):
+                 epsilon_filtering: Optional[float] = None, 
+                 n_jobs: int = -1, **kwargs):
         """
         Initialize directed flag complex builder.
         
         Args:
             use_geodesic_distance: Whether to use geodesic distances
             epsilon_filtering: Epsilon value for filtering (None to disable)
+            n_jobs: Number of parallel jobs (-1 for all CPUs, 1 for single-threaded)
             *args, **kwargs: Passed to parent class
         """
         super().__init__(*args, **kwargs)
         self.use_geodesic_distance = use_geodesic_distance
         self.epsilon_filtering = epsilon_filtering
+        self.n_jobs = n_jobs
     
     def build_complex(self, graph: Union[Graph, sp.csr_matrix]) -> Union[sp.csr_matrix, Any]:
         """
@@ -131,7 +146,10 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
         # This change is critical for matching nn-evolution's methodology
         
         if self.backend == "flagser":
-            # Flagser works directly with adjacency matrices
+            # giotto-tda FlagserPersistence works directly with adjacency matrices
+            return adjacency_matrix
+        elif self.backend == "flagser_legacy":
+            # Legacy pyflagser works directly with adjacency matrices
             return adjacency_matrix
         elif self.backend == "gudhi":
             # Convert to Gudhi format
@@ -210,7 +228,9 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
             
             # Keep points with persistence > epsilon_filtering
             mask = persistence_lengths > self.epsilon_filtering
-            filtered_diagrams[dim] = dgm[mask]
+            filtered_dgm = dgm[mask]
+            
+            filtered_diagrams[dim] = filtered_dgm
         
         return filtered_diagrams
     
@@ -249,40 +269,105 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
             Dictionary mapping dimension to persistence diagrams
         """
         if self.backend == "flagser":
-            diagrams = self._compute_flagser_persistence(complex)
+            diagrams = self._compute_giotto_flagser_persistence(complex)
+        elif self.backend == "flagser_legacy":
+            diagrams = self._compute_pyflagser_persistence(complex)
+            # Apply epsilon filtering AFTER persistence computation (legacy method)
+            if self.epsilon_filtering is not None:
+                diagrams = self._filter_persistence_diagrams(diagrams)
         elif self.backend == "gudhi":
             diagrams = self._compute_gudhi_persistence(complex)
+            # Apply epsilon filtering AFTER persistence computation (legacy method)
+            if self.epsilon_filtering is not None:
+                diagrams = self._filter_persistence_diagrams(diagrams)
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
         
-        # Apply epsilon filtering AFTER persistence computation (nn-evolution style)
+        return diagrams
+    
+    def _compute_giotto_flagser_persistence(self, adjacency: sp.csr_matrix) -> Dict[int, np.ndarray]:
+        """Compute persistence using giotto-tda FlagserPersistence (nn-evolution style)."""
+        if not GIOTTO_FLAGSER_AVAILABLE:
+            raise ImportError("giotto-tda not available")
+            
+        # Create FlagserPersistence instance (matching nn-evolution parameters)
+        # Use parallel processing for better performance
+        flags = FlagserPersistence(
+            directed=True,
+            homology_dimensions=list(range(self.max_dimension + 1)),
+            max_edge_weight=self.max_edge_length,
+            n_jobs=self.n_jobs  # Enable parallel processing
+        )
+        
+        # Transform adjacency matrix - giotto-tda expects a list of matrices
+        diagrams_gtda = flags.fit_transform([adjacency])
+        
+        # Apply epsilon filtering using giotto-tda's Filtering (nn-evolution style)
         if self.epsilon_filtering is not None:
-            diagrams = self._filter_persistence_diagrams(diagrams)
+            filtering = Filtering(epsilon=self.epsilon_filtering)
+            diagrams_gtda = filtering.fit_transform(diagrams_gtda)
+        
+        # Convert giotto-tda format to our internal format
+        # giotto-tda returns shape (n_samples, n_features, 3) where each row is [birth, death, dimension]
+        diagrams = {}
+        
+        # Initialize empty diagrams for all dimensions
+        for dim in range(self.max_dimension + 1):
+            diagrams[dim] = np.empty((0, 2))
+        
+        # Extract persistence pairs from giotto-tda format
+        if diagrams_gtda.shape[0] > 0:  # Check if we have samples
+            sample_diagrams = diagrams_gtda[0]  # Take first (and only) sample
+            
+            for dim in range(self.max_dimension + 1):
+                # Find all points with this dimension
+                dim_mask = sample_diagrams[:, 2] == dim
+                if np.any(dim_mask):
+                    # Extract birth-death pairs for this dimension
+                    birth_death = sample_diagrams[dim_mask][:, :2]  # [birth, death]
+                    
+                    # Filter out diagonal elements (birth == death) - these are padding
+                    non_diagonal = birth_death[:, 0] != birth_death[:, 1]
+                    if np.any(non_diagonal):
+                        diagrams[dim] = birth_death[non_diagonal]
         
         return diagrams
     
-    def _compute_flagser_persistence(self, adjacency: sp.csr_matrix) -> Dict[int, np.ndarray]:
-        """Compute persistence using flagser."""
-        if not FLAGSER_AVAILABLE:
+    def _compute_pyflagser_persistence(self, adjacency: sp.csr_matrix) -> Dict[int, np.ndarray]:
+        """Compute persistence using direct pyflagser (legacy method)."""
+        if not PYFLAGSER_AVAILABLE:
             # Try to use flagser CLI as fallback
             return self._compute_flagser_cli_persistence(adjacency)
         
         # Use python-flagser bindings
-        result = flagser.flagser(
-            adjacency,
+        # Convert sparse matrix to dense numpy array for pyflagser
+        if sp.issparse(adjacency):
+            adjacency_dense = adjacency.toarray()
+        else:
+            adjacency_dense = adjacency
+            
+        result = flagser_weighted(
+            adjacency_dense,
+            max_edge_weight=self.max_edge_length,  # Apply max edge weight constraint
+            min_dimension=0,
             max_dimension=self.max_dimension,
             directed=True,
             filtration="max",  # Use max of edge weights for simplex filtration
-            max_edge_weight=self.max_edge_length  # Apply max edge weight constraint
+            coeff=2
         )
         
         # Extract persistence diagrams
         diagrams = {}
+        dgms = result.get('dgms', [])
+        
+        # pyflagser returns a list of diagrams, one for each dimension
         for dim in range(self.max_dimension + 1):
-            if f"dgm{dim}" in result:
-                dgm = result[f"dgm{dim}"]
+            if dim < len(dgms):
+                dgm = dgms[dim]
                 # Replace infinite values with max_edge_length (following nn-evolution)
-                dgm[dgm == np.inf] = self.max_edge_length
+                dgm = np.array(dgm)  # Ensure it's a numpy array
+                if len(dgm) > 0:
+                    dgm[dgm == np.inf] = self.max_edge_length
                 diagrams[dim] = dgm
             else:
                 diagrams[dim] = np.empty((0, 2))
@@ -387,6 +472,7 @@ class DirectedFlagComplex(NetworkSimplicialComplex):
                     if death != float('inf') and death - birth > 0:
                         pairs.append([birth, death])
             diagrams[dim] = np.array(pairs) if pairs else np.empty((0, 2))
+            
         
         return diagrams
     
@@ -498,7 +584,8 @@ def compute_network_homology(graph: Union[Graph, sp.csr_matrix],
                            max_edge_length: float = 1.0,
                            backend: str = "auto",
                            use_geodesic_distance: bool = False,
-                           epsilon_filtering: Optional[float] = None) -> Dict[str, Any]:
+                           epsilon_filtering: Optional[float] = None,
+                           n_jobs: int = -1) -> Dict[str, Any]:
     """
     Convenience function to compute homology of a network graph.
     
@@ -509,6 +596,7 @@ def compute_network_homology(graph: Union[Graph, sp.csr_matrix],
         backend: Backend to use for computation
         use_geodesic_distance: Whether to compute geodesic distances
         epsilon_filtering: Epsilon value for filtering (None to disable)
+        n_jobs: Number of parallel jobs (-1 for all CPUs)
         
     Returns:
         Dictionary containing:
@@ -516,13 +604,14 @@ def compute_network_homology(graph: Union[Graph, sp.csr_matrix],
         - "persistence_diagrams": Dict of persistence diagrams by dimension
         - "backend_used": The backend that was used
     """
-    # Create directed flag complex
+    # Create directed flag complex with parallel processing
     complex_builder = DirectedFlagComplex(
         max_dimension=max_dimension,
         max_edge_length=max_edge_length,
         backend=backend,
         use_geodesic_distance=use_geodesic_distance,
-        epsilon_filtering=epsilon_filtering
+        epsilon_filtering=epsilon_filtering,
+        n_jobs=n_jobs
     )
     
     # Build complex

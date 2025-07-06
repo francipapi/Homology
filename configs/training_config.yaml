@@ -1,21 +1,32 @@
 # PyTorch Training Configuration
 model:
-  input_dim: 3  # Set to 3 for torus data
+  input_dim: 100  # Input dimension options:
+                # - 3: For torus/synthetic 3D data
+                # - 49: For MNIST PCA 7x7 images (flattened)
+                # - 100: For MNIST PCA 10x10 images (flattened)
+                # - 196: For MNIST PCA 14x14 images (flattened)
+                # - 784: For full MNIST (28x28 flattened, memory intensive)
   # hidden_dims: [32, 64, 32] # Removed as per new requirements
   num_hidden_layers: 8  # Fixed to 8 layers
   hidden_dim: 32 # Fixed to 32 neurons
-  output_dim: 1  # Binary classification
+  output_dim: 10  # Output dimension options:
+                 # - 1: Binary classification (torus, MNIST binary)
+                 # - 10: Multi-class classification (full MNIST digits 0-9)
   activation_fn_name: 'relu'
-  output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
+  output_activation_fn_name: 'softmax' # Output layer activation options:
+                                       # - 'sigmoid': Binary classification (output_dim=1)
+                                       # - 'softmax': Multi-class classification (output_dim>1)
+                                       # - 'none': No activation (regression tasks)
   dropout_rate: 0.0012  # Slightly reduced dropout
   use_batch_norm: false
 
 training:
   # General training settings
-  device: 'cpu'       # cpu, cuda or mps
-  epochs: 20 # Temporarily reduced for testing
-  batch_size: 64    # Increased batch size for MPS
-  learning_rate: 0.0015  # Reduced learning rate
+  device: 'mps'       # auto, cpu, cuda or mps
+                      # Using CPU for better debugging
+  epochs: 10 # Very minimal epochs for testing
+  batch_size: 32    # Smaller batch size for testing
+  learning_rate: 0.001  # Standard learning rate
   seed: 42            # Random seed for reproducibility
 
   # Optimizer settings (example: AdamW)
@@ -28,8 +39,12 @@ training:
     l1_lambda: 0 #0.0000012  # L1 regularization strength (0.0 = disabled)
     l2_lambda: 0 #0.0004   # L2 regularization strength (0.0 = disabled)
 
-  # Loss function
-  loss_fn: 'bce' # 'bce' (BinaryCrossEntropy), 'mse' (MeanSquaredError), 'cross_entropy' (CrossEntropyLoss for multi-class)
+  # Loss function options:
+  loss_fn: 'cross_entropy' # Loss function options:
+                 # - 'bce': Binary Cross Entropy (for binary classification, output_dim=1)
+                 # - 'cross_entropy': Cross Entropy Loss (for multi-class, output_dim>1) 
+                 # - 'mse': Mean Squared Error (for regression tasks)
+                 # Note: Use 'cross_entropy' for MNIST multi-class (10 digits)
 
   # Learning rate scheduler (optional)
   lr_scheduler:
@@ -51,17 +66,35 @@ training:
     min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
 
   # Settings for vectorized and parallel training
-  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  num_networks: 100 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
   max_parallel_workers: null  # Will default to os.cpu_count()
-  save_model_threshold: 0.9 # Optional: Minimum accuracy/metric to save a trained model
+  save_model_threshold: 0.9 # Optional: Minimum accuracy/metric to save a trained model (legacy support)
+
+  # Model saving configuration
+  save_model:
+    enabled: false          # Enable/disable model saving after training
+    threshold: 0.85         # Minimum accuracy required to save the model (0.0-1.0)
+    save_dir: 'results/models'  # Directory where trained models will be saved
 
 data:
   # General data loading and preprocessing settings
-  type: 'synthetic'    # 'synthetic', 'csv', 'custom_function'
+  type: 'file'    # Data type options:
+                       # - 'synthetic': Generate synthetic data (torus, moons)
+                       # - 'file': Load from file (MNIST, custom datasets)
+                       # - 'csv': Load from CSV file
   path: null           # Path to data file if type is 'csv'
-  data_source: null    # Path to dataset file to load instead of generating synthetic data. If null, use generation function
-  synthetic_type: 'torus' # 'moons' or 'torus'
-  noise: 0           # Reduced noise
+  data_source: 'data/processed/mnist_pca_10x10_multiclass.npy'    # Path to dataset file to load instead of generating synthetic data
+                       # MNIST PCA Image examples:
+                       # - 'data/processed/mnist_pca_7x7_binary.npy': MNIST binary, 7x7 PCA images (54.5% variance)
+                       # - 'data/processed/mnist_pca_7x7_multiclass.npy': MNIST 10-class, 7x7 PCA images
+                       # - 'data/processed/mnist_pca_10x10_binary.npy': MNIST binary, 10x10 PCA images (70.4% variance)
+                       # - 'data/processed/mnist_pca_10x10_multiclass.npy': MNIST 10-class, 10x10 PCA images
+                       # - 'data/processed/mnist_pca_14x14_binary.npy': MNIST binary, 14x14 PCA images (86.2% variance)
+                       # - 'data/processed/mnist_pca_14x14_multiclass.npy': MNIST 10-class, 14x14 PCA images
+                       # - 'data/processed/mnist_full_multiclass.npy': Full MNIST 10-class, 784D
+                       # If null, use generation function for synthetic data
+  synthetic_type: 'torus' # Synthetic data type: 'moons' or 'torus' (when type='synthetic')
+  noise: 0           # Reduced noise (for synthetic data generation)
   # For make_classification
   # n_features: 2
   # n_classes: 2
@@ -86,75 +119,123 @@ data:
 
 # Layer extraction settings
 layer_extraction:
-  enabled: true     # If true, extract and save layer outputs
+  enabled: false     # If true, extract and save layer outputs
   output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
-  train_test_layer_extraction: true  # If true, extract train and test activations separately for Wasserstein analysis
+  train_test_layer_extraction: false  # If true, extract train and test activations separately for Wasserstein analysis
   train_test_output_dir: 'results/train_test_layer_outputs'  # Directory for separate train/test activations
   variable_length_output: true  # If true, save layer outputs without padding (preserves natural dimensions)
 
 # Custom architecture configuration
 custom_architecture:
-  enabled: true  # Set to true to use custom architecture instead of standard MLP
-  input_shape: [3]  # Input shape - [3] for 1D input, [1, 28, 28] for 2D images, etc.
+  enabled: true  # Set to false to use standard MLP with flattened PCA images
+  input_shape: [1, 10, 10]  # Input shape options:
+                    # - [3]: For torus/synthetic 3D data
+                    # - [1, 7, 7]: For MNIST PCA 7x7 images (49 components, 54.5% variance)
+                    # - [1, 10, 10]: For MNIST PCA 10x10 images (100 components, 70.4% variance)
+                    # - [1, 14, 14]: For MNIST PCA 14x14 images (196 components, 86.2% variance)
+                    # - [1, 28, 28]: For full MNIST 28x28 images (784D)
   
   # Define layers sequentially
   # Each layer is processed in order, with automatic shape inference
   layers:
-    # Example 1: Simple Linear + Conv1D architecture
-    - type: linear
-      out_features: 32
-      activation: relu
-      batch_norm: false
-      dropout: 0.0
-
-    - type: linear
-      out_features: 32
-      activation: relu
-      batch_norm: false
-      dropout: 0.0
+    # Very simple CNN for 10x10 PCA images
     
-    # Reshape to add channel dimension for conv1d
-    - type: reshape
-      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
-    
-    - type: conv1d
-      out_channels: 32
-      kernel_size: 2  # Kernel size 2 for length 2 input
+    - type: conv2d
+      out_channels: 8  # Much smaller
+      kernel_size: 3
       stride: 1
-      padding: 0  # No padding needed
-      activation: relu
-      batch_norm: false
-
-    - type: reshape
-      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
-    
-    - type: conv1d
-      out_channels: 32
-      kernel_size: 2  # Kernel size 2 for length 2 input
-      stride: 1
-      padding: 0  # No padding needed
-      activation: relu
-      batch_norm: false
-
-    - type: reshape
-      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
-    
-    - type: conv1d
-      out_channels: 32
-      kernel_size: 2  # Kernel size 2 for length 2 input
-      stride: 1
-      padding: 0  # No padding needed
+      padding: 0
       activation: relu
       batch_norm: false
     
     - type: flatten
-    
+
     - type: linear
-      out_features: 1
-      activation: sigmoid
-  
-  
+      out_features: 32  # Much smaller
+      activation: relu
+
+    - type: linear
+      out_features: 10
+      activation: softmax
+    
   # Layer extraction settings for custom architectures
   extract_from_layers: "all"  # "all" or list of layer indices to extract from
   flatten_conv_activations: true  # Flatten conv activations for homology computation
   skip_final_layer: true  # Skip extracting the final output layer (dimension 1)
+
+# =============================================================================
+# MNIST DATASET CONFIGURATION EXAMPLES
+# =============================================================================
+# 
+# To train on MNIST, first prepare the dataset using:
+#   python src/data/mnist_loader.py
+# 
+# Then modify the configuration sections above as shown in these examples:
+#
+# EXAMPLE 1: MNIST Binary Classification with PCA-50
+# ---------------------------------------------------
+# model:
+#   input_dim: 50
+#   output_dim: 1
+#   output_activation_fn_name: 'sigmoid'
+# 
+# training:
+#   loss_fn: 'bce'
+# 
+# data:
+#   type: 'file'
+#   data_source: 'data/processed/mnist_pca_50_binary.npy'
+# 
+# custom_architecture:
+#   input_shape: [50]
+#
+# EXAMPLE 2: MNIST 10-Class Classification with PCA-100
+# ------------------------------------------------------
+# model:
+#   input_dim: 100
+#   output_dim: 10
+#   output_activation_fn_name: 'softmax'
+# 
+# training:
+#   loss_fn: 'cross_entropy'
+# 
+# data:
+#   type: 'file'
+#   data_source: 'data/processed/mnist_pca_100_multiclass.npy'
+# 
+# custom_architecture:
+#   input_shape: [100]
+#
+# EXAMPLE 3: Full Resolution MNIST with Custom CNN Architecture
+# -------------------------------------------------------------
+# model:
+#   input_dim: 784
+#   output_dim: 10
+#   output_activation_fn_name: 'softmax'
+# 
+# training:
+#   loss_fn: 'cross_entropy'
+# 
+# data:
+#   type: 'file'
+#   data_source: 'data/processed/mnist_full_multiclass.npy'
+# 
+# custom_architecture:
+#   input_shape: [1, 28, 28]  # For 2D CNN layers
+#   layers:
+#     - type: conv2d
+#       out_channels: 32
+#       kernel_size: 3
+#       activation: relu
+#     - type: conv2d  
+#       out_channels: 64
+#       kernel_size: 3
+#       activation: relu
+#     - type: flatten
+#     - type: linear
+#       out_features: 128
+#       activation: relu
+#     - type: linear
+#       out_features: 10
+#       activation: softmax
+# =============================================================================

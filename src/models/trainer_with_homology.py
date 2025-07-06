@@ -44,6 +44,7 @@ class TrainerWithHomology:
             config: Training configuration
             homology_config: Network homology configuration (optional)
         """
+        print("Initializing TrainerWithHomology...")
         self.model = model
         self.config = config
         self.training_config = config['training']
@@ -62,7 +63,9 @@ class TrainerWithHomology:
         
         # Initialize homology tracker if enabled
         if self.homology_enabled:
+            print("Creating NetworkHomologyTracker...")
             self.homology_tracker = NetworkHomologyTracker(homology_config)
+            print("NetworkHomologyTracker created successfully")
             
             # Get alignment settings from simplified configuration
             alignment_config = homology_config.get('network_homology', {}).get('alignment', {})
@@ -157,12 +160,14 @@ class TrainerWithHomology:
     
     def prepare_data(self) -> Tuple[DataLoader, DataLoader]:
         """Prepare training and validation data loaders."""
+        print("Preparing data...")
         # Load or generate data
         data_source = self.data_config.get('data_source')
         
         if data_source is not None:
             print(f"Loading data from: {data_source}")
             X, y = load_data_from_file(data_source)
+            print(f"Data loaded successfully. Shape: X={X.shape}, y={y.shape}")
         elif self.data_config['type'] == 'synthetic':
             num_samples = self.data_config.get('generation', {}).get('n', 1000)
             big_radius = self.data_config.get('generation', {}).get('big_radius', 3)
@@ -177,10 +182,59 @@ class TrainerWithHomology:
         X = X.to(self.device)
         y = y.to(self.device)
         
-        # Shuffle data
-        perm = torch.randperm(len(X))
-        X = X[perm]
-        y = y[perm]
+        # Reshape input data to match model requirements
+        if hasattr(self.model, 'input_shape'):
+            # Custom architecture - handle 2D/3D reshaping
+            expected_shape = self.model.input_shape
+            print(f"Model expects input shape: {expected_shape}")
+            print(f"Current data shape: {X.shape}")
+            
+            if len(expected_shape) == 3:
+                # Expected format: [channels, height, width]
+                channels, height, width = expected_shape
+                
+                if X.dim() == 3 and X.shape[1:] == (height, width):
+                    # Data is (N, H, W), need to add channel dimension
+                    X = X.unsqueeze(1)  # (N, H, W) -> (N, 1, H, W)
+                    print(f"Added channel dimension: {X.shape}")
+                elif X.dim() == 2 and X.shape[1] == height * width:
+                    # Data is flattened (N, H*W), reshape to (N, 1, H, W)
+                    X = X.view(-1, channels, height, width)
+                    print(f"Reshaped flattened data to: {X.shape}")
+                elif X.dim() == 2 and X.shape[1] == 784 and expected_shape == [1, 28, 28]:
+                    # Original MNIST (N, 784) to (N, 1, 28, 28)
+                    X = X.view(-1, 1, 28, 28)
+                    print(f"Reshaped original MNIST to: {X.shape}")
+            elif len(expected_shape) == 1:
+                # Expected 1D input - flatten if needed
+                if X.dim() > 2:
+                    X = X.view(X.size(0), -1)
+                    print(f"Flattened data to: {X.shape}")
+        else:
+            # Standard MLP - flatten any multi-dimensional data
+            if X.dim() > 2:
+                X = X.view(X.size(0), -1)
+                print(f"Flattened data for MLP: {X.shape}")
+        
+        # Shuffle data with MPS fallback
+        print("Shuffling data...")
+        try:
+            perm = torch.randperm(len(X), device=self.device)
+            X = X[perm]
+            y = y[perm]
+        except Exception as e:
+            # Fallback: Use CPU for randperm if MPS has issues
+            print(f"Using CPU fallback for shuffling due to: {e}")
+            X_cpu = X.cpu()
+            y_cpu = y.cpu()
+            perm = torch.randperm(len(X_cpu))
+            X = X_cpu[perm].to(self.device)
+            y = y_cpu[perm].to(self.device)
+        
+        # Convert labels to float for BCE loss if needed
+        loss_fn = self.training_config.get('loss_fn', 'bce').lower()
+        if loss_fn == 'bce':
+            y = y.float()
         
         # Split data
         split_ratio = self.data_config.get('split_ratio', 0.8)
@@ -226,9 +280,19 @@ class TrainerWithHomology:
             
             # Track metrics
             train_loss_sum += loss.item()
-            predicted = (output > 0.5).float()
-            total_train += target.size(0)
-            correct_train += (predicted == target).sum().item()
+            
+            # Calculate accuracy based on loss function type
+            loss_fn_name = self.training_config.get('loss_fn', 'bce').lower()
+            if loss_fn_name == 'cross_entropy':
+                # Multi-class classification
+                _, predicted = torch.max(output.data, 1)
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
+            else:
+                # Binary classification (BCE) or regression (MSE)
+                predicted = (output > 0.5).float()
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
             
             # Perfect alignment tracking - only for step-based mode
             # Fix: Skip step 0 to avoid incorrect counting
@@ -290,9 +354,18 @@ class TrainerWithHomology:
                 loss = self.criterion(output, target)
                 test_loss_sum += loss.item()
                 
-                predicted = (output > 0.5).float()
-                total_test += target.size(0)
-                correct_test += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                loss_fn_name = self.training_config.get('loss_fn', 'bce').lower()
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
         
         avg_test_loss = test_loss_sum / len(test_loader)
         test_accuracy = correct_test / total_test
@@ -323,8 +396,16 @@ class TrainerWithHomology:
                 if output.shape != target.shape:
                     output = output.squeeze(-1)
                 
-                predicted = (output > 0.5).float()
-                correct += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                loss_fn_name = self.training_config.get('loss_fn', 'bce').lower()
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    correct += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    correct += (predicted == target).sum().item()
                 total += 1
         
         self.model.train()
@@ -362,8 +443,16 @@ class TrainerWithHomology:
                 if output.shape != target.shape:
                     output = output.squeeze(-1)
                 
-                predicted = (output > 0.5).float()
-                correct += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                loss_fn_name = self.training_config.get('loss_fn', 'bce').lower()
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    correct += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    correct += (predicted == target).sum().item()
                 total += target.size(0)
                 samples_processed += target.size(0)
         
@@ -394,8 +483,16 @@ class TrainerWithHomology:
                 if output.shape != target.shape:
                     output = output.squeeze(-1)
                 
-                predicted = (output > 0.5).float()
-                correct += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                loss_fn_name = self.training_config.get('loss_fn', 'bce').lower()
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    correct += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    correct += (predicted == target).sum().item()
                 total += target.size(0)
         
         self.model.train()
@@ -499,7 +596,9 @@ class TrainerWithHomology:
         print(f"Model architecture:\n{self.model}")
         
         # Prepare data
+        print("Calling prepare_data()...")
         train_loader, test_loader = self.prepare_data()
+        print(f"Data loaders created. Train batches: {len(train_loader)}, Test batches: {len(test_loader)}")
         
         # Training history
         history = {
@@ -560,6 +659,14 @@ class TrainerWithHomology:
             homology_stats = self.homology_tracker.get_summary_statistics()
             results['homology_statistics'] = homology_stats
             
+            # Check if we have valid homology statistics
+            if 'error' in homology_stats:
+                print(f"\n⚠️  Homology tracking error: {homology_stats['error']}")
+                homology_stats = {
+                    'num_snapshots': 0,
+                    'average_computation_time': 0.0
+                }
+            
             # Get synchronized data for perfect alignment
             sync_data = self.get_synchronized_data()
             results['synchronized_data'] = sync_data
@@ -598,15 +705,19 @@ class TrainerWithHomology:
                 results['original_correlation'] = 0.0
             
             print(f"\n🔬 Homology tracking complete:")
-            print(f"  📈 Total homology computations: {homology_stats['num_snapshots']}")
+            print(f"  📈 Total homology computations: {homology_stats.get('num_snapshots', 0)}")
             print(f"  🎯 Synchronized measurements: {len(sync_data['distances'])}")
             print(f"  📊 Tracking mode: {self.track_mode} (every {self.validation_interval} {self.track_mode}s)")
-            print(f"  🔗 Perfect alignment correlation: {results.get('synchronized_correlation', 0.0):.4f}")
-            print(f"  🔬 nn-evolution style correlation: {results.get('nn_evolution_correlation', 0.0):.4f}")
-            print(f"  📊 Original correlation: {results.get('original_correlation', 0.0):.4f}")
-            if p_value is not None:
-                print(f"  📊 P-value: {p_value:.6f}")
-            print(f"  ⏱️  Average computation time: {homology_stats['average_computation_time']:.2f}s")
+            if homology_stats.get('num_snapshots', 0) > 0:
+                print(f"  🔗 Perfect alignment correlation: {results.get('synchronized_correlation', 0.0):.4f}")
+                print(f"  🔬 nn-evolution style correlation: {results.get('nn_evolution_correlation', 0.0):.4f}")
+                print(f"  📊 Original correlation: {results.get('original_correlation', 0.0):.4f}")
+                if p_value is not None:
+                    print(f"  📊 P-value: {p_value:.6f}")
+                print(f"  ⏱️  Average computation time: {homology_stats.get('average_computation_time', 0.0):.2f}s")
+            else:
+                print(f"  ⚠️  No homology snapshots were recorded during training")
+                print(f"  💡 Try reducing validation_interval or training for more {self.track_mode}s")
         
         print(f"\nTraining completed in {total_time:.2f} seconds")
         

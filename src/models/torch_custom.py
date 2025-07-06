@@ -11,6 +11,9 @@ from typing import List, Dict, Any, Tuple, Optional, Union
 import sys
 import os
 
+# Enable MPS fallback for operations not supported natively on MPS
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent
 if str(project_root) not in sys.path:
@@ -52,6 +55,7 @@ class CustomNet(nn.Module):
             'relu': nn.ReLU(inplace=True),
             'tanh': nn.Tanh(),
             'sigmoid': nn.Sigmoid(),
+            'softmax': nn.Softmax(dim=1),
             'leaky_relu': nn.LeakyReLU(inplace=True),
             'elu': nn.ELU(inplace=True),
             'gelu': nn.GELU()
@@ -305,13 +309,20 @@ class CustomNet(nn.Module):
         
         print(f"Extracting activations from {len(self.activation_indices)} layers")
         
+        # Use CPU for layer extraction to avoid MPS limitations
+        extraction_device = torch.device('cpu')
+        print(f"Using {extraction_device} for layer extraction (avoiding MPS limitations)")
+        
+        # Move model to CPU for extraction
+        self.to(extraction_device)
+        
         # Collect all data
         all_data = []
         for data, _ in data_loader:
-            all_data.append(data)
+            all_data.append(data.to(extraction_device))
         
         # Concatenate all batches
-        full_data = torch.cat(all_data, dim=0).to(device)
+        full_data = torch.cat(all_data, dim=0)
         print(f"Full dataset shape: {full_data.shape}")
         
         # Process entire dataset at once
@@ -421,8 +432,18 @@ def train_model(config_path: str):
     l1_lambda = reg_config.get('l1_lambda', 0.0)
     l2_lambda = reg_config.get('l2_lambda', 0.0)
     
-    # Loss function
-    criterion = nn.BCELoss()
+    # Loss function (configurable)
+    loss_fn_name = training_config.get('loss_fn', 'bce').lower()
+    if loss_fn_name == 'bce':
+        criterion = nn.BCELoss()
+    elif loss_fn_name == 'cross_entropy':
+        criterion = nn.CrossEntropyLoss()
+    elif loss_fn_name == 'mse':
+        criterion = nn.MSELoss()
+    else:
+        raise ValueError(f"Unsupported loss function: {loss_fn_name}")
+    
+    print(f"Using loss function: {loss_fn_name}")
     
     # Mixed precision training
     scaler = GradScaler() if device.type == 'cuda' else None
@@ -442,15 +463,46 @@ def train_model(config_path: str):
     else:
         raise ValueError("Either set data_source or use synthetic data.")
     
-    # Move data to device
+    # Move data to device and adjust label format for loss function
     X = X.to(device)
     y = y.to(device)
     
+    # Reshape input data to match expected input_shape
+    expected_shape = config['custom_architecture']['input_shape']
+    if len(expected_shape) == 3 and X.dim() == 2 and X.shape[1] == 784:
+        # Reshape flattened MNIST (N, 784) to image format (N, 1, 28, 28)
+        if expected_shape == [1, 28, 28] and X.shape[1] == 784:
+            X = X.view(-1, 1, 28, 28)
+            print(f"Reshaped input from (N, 784) to {X.shape}")
+    elif len(expected_shape) == 1 and X.dim() == 2 and X.shape[1] == 784:
+        # Keep flattened for 1D input
+        pass
+    
+    # For CrossEntropyLoss, ensure labels are LongTensor with shape (N,) containing class indices
+    if loss_fn_name == 'cross_entropy':
+        if y.dim() > 1 and y.size(1) == 1:
+            y = y.squeeze()  # Remove extra dimension if needed
+        y = y.long()  # Convert to LongTensor for CrossEntropyLoss
+    elif loss_fn_name == 'bce':
+        y = y.float()  # Ensure float for BCELoss
+        # For BCELoss, ensure labels have shape (N, 1) to match output
+        if y.dim() == 1:
+            y = y.unsqueeze(1)  # Add dimension: (N,) -> (N, 1)
+    
     # Shuffle data
-    # Use CPU for randperm to avoid MPS issues
-    perm = torch.randperm(len(X))
-    X = X[perm.to(device)]
-    y = y[perm.to(device)]
+    # PyTorch 2.5+ has better MPS support, but keep fallback for compatibility
+    try:
+        perm = torch.randperm(len(X), device=device)
+        X = X[perm]
+        y = y[perm]
+    except Exception as e:
+        # Fallback: Use CPU for randperm if MPS has issues
+        print(f"Using CPU fallback for shuffling due to: {e}")
+        X_cpu = X.cpu()
+        y_cpu = y.cpu()
+        perm = torch.randperm(len(X_cpu))
+        X = X_cpu[perm].to(device)
+        y = y_cpu[perm].to(device)
     
     # Split data
     split_ratio = data_config.get('split_ratio', 0.8)
@@ -501,9 +553,14 @@ def train_model(config_path: str):
             if scaler is not None:
                 with autocast():
                     output = model(data)
-                    # Ensure output shape matches target shape
-                    if output.shape != target.shape:
-                        output = output.squeeze(-1)
+                    # Adjust output shape based on loss function
+                    if loss_fn_name == 'cross_entropy':
+                        # CrossEntropyLoss expects (N, C) output and (N,) target
+                        pass  # Keep output as is
+                    else:
+                        # BCE/MSE expect matching shapes
+                        if output.shape != target.shape:
+                            output = output.squeeze(-1)
                     loss = criterion(output, target)
                     
                     # Add regularization
@@ -521,9 +578,14 @@ def train_model(config_path: str):
                 scaler.update()
             else:
                 output = model(data)
-                # Ensure output shape matches target shape
-                if output.shape != target.shape:
-                    output = output.squeeze(-1)
+                # Adjust output shape based on loss function
+                if loss_fn_name == 'cross_entropy':
+                    # CrossEntropyLoss expects (N, C) output and (N,) target
+                    pass  # Keep output as is
+                else:
+                    # BCE/MSE expect matching shapes
+                    if output.shape != target.shape:
+                        output = output.squeeze(-1)
                 loss = criterion(output, target)
                 
                 # Add regularization
@@ -540,9 +602,18 @@ def train_model(config_path: str):
                 optimizer.step()
             
             train_loss_sum += loss.item()
-            predicted = (output > 0.5).float()
-            total_train += target.size(0)
-            correct_train += (predicted == target).sum().item()
+            
+            # Calculate accuracy based on loss function type
+            if loss_fn_name == 'cross_entropy':
+                # Multi-class classification
+                _, predicted = torch.max(output.data, 1)
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
+            else:
+                # Binary classification (BCE) or regression (MSE)
+                predicted = (output > 0.5).float()
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
         
         avg_train_loss = train_loss_sum / len(train_loader)
         train_accuracy = correct_train / total_train
@@ -556,14 +627,28 @@ def train_model(config_path: str):
         with torch.no_grad():
             for data, target in test_loader:
                 output = model(data)
-                if output.shape != target.shape:
-                    output = output.squeeze(-1)
+                # Adjust output shape based on loss function
+                if loss_fn_name == 'cross_entropy':
+                    # CrossEntropyLoss expects (N, C) output and (N,) target
+                    pass  # Keep output as is
+                else:
+                    # BCE/MSE expect matching shapes
+                    if output.shape != target.shape:
+                        output = output.squeeze(-1)
                 loss = criterion(output, target)
                 test_loss_sum += loss.item()
                 
-                predicted = (output > 0.5).float()
-                total_test += target.size(0)
-                correct_test += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
         
         avg_test_loss = test_loss_sum / len(test_loader)
         test_accuracy = correct_test / total_test
@@ -576,6 +661,30 @@ def train_model(config_path: str):
             scheduler.step(avg_test_loss)
     
     print("\nTraining finished.")
+    
+    # Save model if enabled and final accuracy meets threshold
+    save_model_config = training_config.get('save_model', {})
+    if save_model_config.get('enabled', False):
+        threshold = save_model_config.get('threshold', 0.0)
+        if test_accuracy >= threshold:
+            save_dir = Path(save_model_config.get('save_dir', 'results/models'))
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            model_filename = f"torch_custom_acc_{test_accuracy:.4f}_epoch_{training_config['epochs']}.pth"
+            model_path = save_dir / model_filename
+            
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'custom_config': custom_config,
+                'training_config': training_config,
+                'final_accuracy': test_accuracy,
+                'final_loss': avg_test_loss,
+                'epochs_trained': training_config['epochs']
+            }, model_path)
+            
+            print(f"Model saved to: {model_path} (accuracy: {test_accuracy:.4f})")
+        else:
+            print(f"Model not saved: accuracy {test_accuracy:.4f} below threshold {threshold:.4f}")
     
     # Extract layer outputs if enabled
     layer_extraction_config = config.get('layer_extraction', {})

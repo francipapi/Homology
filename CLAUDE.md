@@ -53,8 +53,8 @@ The myenv Python path is: `/opt/anaconda3/envs/myenv/bin/python`
 ## Architecture Overview
 
 ### Core Pipeline Flow
-1. **Data Generation** (`src/data/`): Creates synthetic torus datasets, MNIST data, or custom datasets
-2. **Neural Network Training** (`src/models/`): Trains networks with multiple backend options
+1. **Data Generation** (`src/data/`): Creates synthetic torus datasets, loads MNIST with PCA preprocessing, or handles custom datasets
+2. **Neural Network Training** (`src/models/`): Trains networks with multiple backend options and full multi-class support
 3. **Topological Analysis** (`src/topology/`): Computes persistent homology using three methods
 4. **Visualization** (`src/visualization/`): Creates Betti curves, decision boundaries, and network graphs
 
@@ -194,14 +194,30 @@ python src/data/visualize_dataset.py
 python src/data/visualize_dataset_3d.py
 ```
 
-### 8. Parameter Grid Search
+### 8. MNIST Dataset Training
+```bash
+# Binary classification with PCA-50
+python scripts/train_mnist.py --pca-dim 50 --binary
+
+# Multi-class classification with PCA-100  
+python scripts/train_mnist.py --pca-dim 100 --multiclass
+
+# Full resolution with custom architecture
+python scripts/train_mnist.py --full-resolution --multiclass --custom
+
+# Quick test mode
+python scripts/train_mnist.py --pca-dim 20 --binary --quick
+```
+Comprehensive MNIST training with automatic dataset preparation, PCA dimensionality reduction, and both binary/multi-class classification support.
+
+### 9. Parameter Grid Search
 ```python
 # Find optimal homology parameters
 python src/utils/parameter_grid_search.py  # GUDHI
 python src/utils/parameter_grid_search_ripser.py  # Ripser
 ```
 
-### 9. Network Homology Comparison
+### 10. Network Homology Comparison
 ```python
 # Compare homology distances between multiple trained networks
 python src/analysis/network_homology_comparison.py

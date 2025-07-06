@@ -10,15 +10,19 @@ from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset, ConcatDataset
 from torch.cuda.amp import autocast, GradScaler  # For mixed precision training
 
+# Enable MPS fallback for operations not supported natively on MPS
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
 # --- MLP Class ---
 class MLP(nn.Module):
-    def __init__(self, input_dim, num_hidden_layers, hidden_dim, output_dim, activation_fn_name='relu', dropout_rate=0.2, use_batch_norm=True):
+    def __init__(self, input_dim, num_hidden_layers, hidden_dim, output_dim, activation_fn_name='relu', output_activation_fn_name='sigmoid', dropout_rate=0.2, use_batch_norm=True):
         super(MLP, self).__init__()
         self.input_dim = input_dim
         self.num_hidden_layers = num_hidden_layers
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.activation_fn_name = activation_fn_name.lower()
+        self.output_activation_fn_name = output_activation_fn_name.lower()
         self.dropout_rate = dropout_rate
         self.use_batch_norm = use_batch_norm
 
@@ -46,7 +50,16 @@ class MLP(nn.Module):
             
         # Output layer
         self.layers.append(nn.Linear(current_dim, output_dim))
-        self.layers.append(nn.Sigmoid())
+        
+        # Output activation
+        if self.output_activation_fn_name == 'sigmoid':
+            self.layers.append(nn.Sigmoid())
+        elif self.output_activation_fn_name == 'softmax':
+            self.layers.append(nn.Softmax(dim=1))
+        elif self.output_activation_fn_name == 'none':
+            pass  # No output activation
+        else:
+            raise ValueError(f"Unsupported output activation function: {self.output_activation_fn_name}")
 
         # Initialize weights
         self._initialize_weights()
@@ -89,13 +102,20 @@ class MLP(nn.Module):
         print(f"Using batch norm: {self.use_batch_norm}")
         print(f"Total number of layers: {len(self.layers)}")
         
+        # Use CPU for layer extraction to avoid MPS limitations
+        extraction_device = torch.device('cpu')
+        print(f"Using {extraction_device} for layer extraction (avoiding MPS limitations)")
+        
+        # Move model to CPU for extraction
+        self.to(extraction_device)
+        
         # Collect all data
         all_data = []
         for data, _ in data_loader:
-            all_data.append(data)
+            all_data.append(data.to(extraction_device))
         
         # Concatenate all batches into one tensor
-        full_data = torch.cat(all_data, dim=0).to(device)
+        full_data = torch.cat(all_data, dim=0)
         print(f"Full dataset shape: {full_data.shape}")
         
         # Process entire dataset at once
@@ -122,6 +142,7 @@ def load_data_from_file(file_path):
     """
     Load dataset from a file. Supports .npy, .npz, .pt, and .pth formats.
     Expected format: X (features) and y (labels) arrays.
+    Supports both flattened vectors and 2D/3D image arrays.
     """
     file_path = Path(file_path)
     if not file_path.exists():
@@ -133,13 +154,25 @@ def load_data_from_file(file_path):
         if isinstance(data, dict) or hasattr(data, 'item'):
             data = data.item() if hasattr(data, 'item') else data
             X = torch.tensor(data['X'], dtype=torch.float32)
-            y = torch.tensor(data['y'], dtype=torch.float32)
+            y = torch.tensor(data['y'], dtype=torch.long)
+            
+            # Print dataset info for debugging
+            print(f"Dataset info:")
+            print(f"  X shape: {X.shape}")
+            print(f"  y shape: {y.shape}")
+            if 'resolution' in data:
+                print(f"  Resolution: {data['resolution']}x{data['resolution']}")
+            if 'explained_variance' in data:
+                print(f"  PCA explained variance: {data['explained_variance']:.4f}")
+            if 'task' in data:
+                print(f"  Task: {data['task']}")
+                
         else:
             raise ValueError("For .npy files, expected dict with 'X' and 'y' keys")
     elif file_path.suffix == '.npz':
         data = np.load(file_path)
         X = torch.tensor(data['X'], dtype=torch.float32)
-        y = torch.tensor(data['y'], dtype=torch.float32)
+        y = torch.tensor(data['y'], dtype=torch.long)
     elif file_path.suffix in ['.pt', '.pth']:
         data = torch.load(file_path)
         if isinstance(data, dict):
@@ -182,7 +215,7 @@ def generate_torus_data(n_samples, big_radius, small_radius, solid=False, interi
     
     # Convert to PyTorch tensors
     X = torch.tensor(X, dtype=torch.float32)
-    y = torch.tensor(y, dtype=torch.float32)
+    y = torch.tensor(y, dtype=torch.long)
     
     return X, y
 
@@ -214,6 +247,7 @@ def train_model(config_path):
         hidden_dim=model_config['hidden_dim'],
         output_dim=model_config['output_dim'],
         activation_fn_name=model_config.get('activation_fn_name', 'relu'),
+        output_activation_fn_name=model_config.get('output_activation_fn_name', 'sigmoid'),
         dropout_rate=model_config.get('dropout_rate', 0.0),
         use_batch_norm=model_config.get('use_batch_norm', False)
     ).to(device)
@@ -241,8 +275,18 @@ def train_model(config_path):
     l1_lambda = reg_config.get('l1_lambda', 0.0)
     l2_lambda = reg_config.get('l2_lambda', 0.0)
 
-    # Loss function
-    criterion = nn.BCELoss()
+    # Loss function (configurable)
+    loss_fn_name = training_config.get('loss_fn', 'bce').lower()
+    if loss_fn_name == 'bce':
+        criterion = nn.BCELoss()
+    elif loss_fn_name == 'cross_entropy':
+        criterion = nn.CrossEntropyLoss()
+    elif loss_fn_name == 'mse':
+        criterion = nn.MSELoss()
+    else:
+        raise ValueError(f"Unsupported loss function: {loss_fn_name}")
+    
+    print(f"Using loss function: {loss_fn_name}")
 
     # Mixed precision training
     scaler = GradScaler() if device.type == 'cuda' else None
@@ -262,14 +306,35 @@ def train_model(config_path):
     else:
         raise ValueError(f"Unsupported data configuration. Either set data_source or use synthetic data.")
         
-    # Move data to device
+    # Move data to device and adjust label format for loss function
     X = X.to(device)
     y = y.to(device)
+    
+    # For CrossEntropyLoss, ensure labels are LongTensor with shape (N,) containing class indices
+    if loss_fn_name == 'cross_entropy':
+        if y.dim() > 1 and y.size(1) == 1:
+            y = y.squeeze()  # Remove extra dimension if needed
+        y = y.long()  # Convert to LongTensor for CrossEntropyLoss
+    elif loss_fn_name == 'bce':
+        y = y.float()  # Ensure float for BCELoss
+        # For BCELoss, ensure labels have shape (N, 1) to match output
+        if y.dim() == 1:
+            y = y.unsqueeze(1)  # Add dimension: (N,) -> (N, 1)
 
-    # Shiffle data 
-    perm = torch.randperm(len(X), device=device)   # random index order
-    X = X[perm]
-    y = y[perm]
+    # Shuffle data 
+    # PyTorch 2.5+ has better MPS support, but keep fallback for compatibility
+    try:
+        perm = torch.randperm(len(X), device=device)
+        X = X[perm]
+        y = y[perm]
+    except Exception as e:
+        # Fallback: Use CPU for randperm if MPS has issues
+        print(f"Using CPU fallback for shuffling due to: {e}")
+        X_cpu = X.cpu()
+        y_cpu = y.cpu()
+        perm = torch.randperm(len(X_cpu))
+        X = X_cpu[perm].to(device)
+        y = y_cpu[perm].to(device)
     
     # Split data
     split_ratio = data_config.get('split_ratio', 0.8)
@@ -343,9 +408,18 @@ def train_model(config_path):
                 optimizer.step()
 
             train_loss_sum += loss.item()
-            predicted = (output > 0.5).float()
-            total_train += target.size(0)
-            correct_train += (predicted == target).sum().item()
+            
+            # Calculate accuracy based on loss function type
+            if loss_fn_name == 'cross_entropy':
+                # Multi-class classification
+                _, predicted = torch.max(output.data, 1)
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
+            else:
+                # Binary classification (BCE) or regression (MSE)
+                predicted = (output > 0.5).float()
+                total_train += target.size(0)
+                correct_train += (predicted == target).sum().item()
         
         avg_train_loss = train_loss_sum / len(train_loader)
         train_accuracy = correct_train / total_train
@@ -362,9 +436,17 @@ def train_model(config_path):
                 loss = criterion(output, target)
                 test_loss_sum += loss.item()
                 
-                predicted = (output > 0.5).float()
-                total_test += target.size(0)
-                correct_test += (predicted == target).sum().item()
+                # Calculate accuracy based on loss function type
+                if loss_fn_name == 'cross_entropy':
+                    # Multi-class classification
+                    _, predicted = torch.max(output.data, 1)
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
+                else:
+                    # Binary classification (BCE) or regression (MSE)
+                    predicted = (output > 0.5).float()
+                    total_test += target.size(0)
+                    correct_test += (predicted == target).sum().item()
 
         avg_test_loss = test_loss_sum / len(test_loader)
         test_accuracy = correct_test / total_test
@@ -378,6 +460,30 @@ def train_model(config_path):
     
     print("Training finished.")
 
+    # Save model if enabled and final accuracy meets threshold
+    save_model_config = training_config.get('save_model', {})
+    if save_model_config.get('enabled', False):
+        threshold = save_model_config.get('threshold', 0.0)
+        if test_accuracy >= threshold:
+            save_dir = Path(save_model_config.get('save_dir', 'results/models'))
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            model_filename = f"torch_mlp_acc_{test_accuracy:.4f}_epoch_{training_config['epochs']}.pth"
+            model_path = save_dir / model_filename
+            
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'model_config': model_config,
+                'training_config': training_config,
+                'final_accuracy': test_accuracy,
+                'final_loss': avg_test_loss,
+                'epochs_trained': training_config['epochs']
+            }, model_path)
+            
+            print(f"Model saved to: {model_path} (accuracy: {test_accuracy:.4f})")
+        else:
+            print(f"Model not saved: accuracy {test_accuracy:.4f} below threshold {threshold:.4f}")
+    
     # Extract layer outputs if enabled
     layer_extraction_config = config.get('layer_extraction', {})
     if layer_extraction_config.get('enabled', False):

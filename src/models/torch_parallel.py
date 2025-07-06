@@ -202,12 +202,31 @@ def train_single_network(args):
 
     # Save model if threshold met
     model_saved = False
-    save_thresh = training_config.get('save_model_threshold', 0.0)
-    if final_acc >= save_thresh:
-        temp_dir = Path(tempfile.gettempdir()) / 'torch_parallel_models'
-        temp_dir.mkdir(exist_ok=True)
-        model_path = temp_dir / f'network_{network_id}_acc_{final_acc:.4f}.pth'
-        torch.save(model.state_dict(), model_path)
+    save_model_config = training_config.get('save_model', {})
+    
+    # Support both old and new configuration formats
+    if save_model_config.get('enabled', False):
+        threshold = save_model_config.get('threshold', 0.0)
+        save_dir = Path(save_model_config.get('save_dir', 'results/models'))
+    else:
+        # Fallback to old threshold configuration
+        threshold = training_config.get('save_model_threshold', 0.0)
+        save_dir = Path('results/models')
+    
+    if final_acc >= threshold:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        model_filename = f'torch_parallel_network_{network_id}_acc_{final_acc:.4f}.pth'
+        model_path = save_dir / model_filename
+        
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'network_id': network_id,
+            'model_config': config['model'],
+            'training_config': config['training'],
+            'final_accuracy': final_acc,
+            'final_loss': final_loss,
+            'training_time': training_time
+        }, model_path)
         model_saved = True
 
     # Extract layer outputs

@@ -192,11 +192,13 @@ class NetworkHomologyTracker:
         Args:
             config: Configuration dictionary (or loads from default config)
         """
+        print("NetworkHomologyTracker.__init__ called")
         if config is None:
             # Load default configuration
             config = self._load_default_config()
         
         self.config = config
+        print("Config loaded, extracting parameters...")
         
         # Extract key parameters from network_homology section
         network_config = config.get('network_homology', {})
@@ -213,6 +215,7 @@ class NetworkHomologyTracker:
         self.max_dimension = int(complex_config.get('max_dimension', 2))
         self.max_edge_length = float(complex_config.get('max_edge_length', 1.0))
         self.backend = str(complex_config.get('backend', 'auto'))
+        self.n_jobs = int(complex_config.get('n_jobs', -1))
         
         # nn-evolution specific parameters
         geodesic_config = network_config.get('geodesic_distance', {})
@@ -243,7 +246,8 @@ class NetworkHomologyTracker:
             max_edge_length=self.max_edge_length,
             backend=self.backend,
             use_geodesic_distance=self.use_geodesic_distance,
-            epsilon_filtering=self.epsilon_filtering
+            epsilon_filtering=self.epsilon_filtering,
+            n_jobs=self.n_jobs
         )
         
         # Initialize history
@@ -256,6 +260,8 @@ class NetworkHomologyTracker:
         # Memory optimization: only store previous state for incremental tracking
         self.previous_persistence_diagrams = None
         self.previous_graph_state = None
+        
+        print("NetworkHomologyTracker initialization complete")
         
     def _load_default_config(self) -> Dict[str, Any]:
         """Load default configuration from file."""
@@ -334,7 +340,8 @@ class NetworkHomologyTracker:
             max_edge_length=self.max_edge_length,
             backend=self.backend,
             use_geodesic_distance=self.use_geodesic_distance,
-            epsilon_filtering=self.epsilon_filtering
+            epsilon_filtering=self.epsilon_filtering,
+            n_jobs=self.n_jobs
         )
         
         # Extract results

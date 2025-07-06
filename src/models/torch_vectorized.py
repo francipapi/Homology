@@ -325,6 +325,45 @@ class VectorizedTrainer:
             
             print(f"Epoch {epoch+1}/{training_config['epochs']} - Loss: {avg_epoch_loss.item():.4f} - Accuracy: {avg_accuracy.item():.4f}")
         
+        # Save models if enabled and they meet threshold
+        save_model_config = training_config.get('save_model', {})
+        if save_model_config.get('enabled', False):
+            threshold = save_model_config.get('threshold', 0.0)
+            save_dir = Path(save_model_config.get('save_dir', 'results/models'))
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            models_saved = 0
+            final_accuracy = avg_accuracy.item()
+            
+            if final_accuracy >= threshold:
+                # Save each model individually in the vectorized setup
+                for network_idx in range(self.num_networks):
+                    # Extract individual model parameters
+                    individual_params = [param[network_idx] for param in self.stacked_params]
+                    individual_buffers = [buffer[network_idx] for buffer in self.stacked_buffers] if self.stacked_buffers else []
+                    
+                    # Create a temporary model to save the state dict
+                    temp_model = type(model_config)  # This would need the actual model class
+                    # For now, save the parameters directly with metadata
+                    model_filename = f"torch_vectorized_network_{network_idx}_acc_{final_accuracy:.4f}.pth"
+                    model_path = save_dir / model_filename
+                    
+                    torch.save({
+                        'stacked_params': [param[network_idx].detach().cpu() for param in self.stacked_params],
+                        'stacked_buffers': [buffer[network_idx].detach().cpu() for buffer in self.stacked_buffers] if self.stacked_buffers else [],
+                        'network_idx': network_idx,
+                        'model_config': self.config['model'],
+                        'training_config': self.config['training'],
+                        'final_accuracy': final_accuracy,
+                        'final_loss': avg_epoch_loss.item(),
+                        'epochs_trained': training_config['epochs']
+                    }, model_path)
+                    models_saved += 1
+                
+                print(f"Saved {models_saved} models to {save_dir} (accuracy: {final_accuracy:.4f})")
+            else:
+                print(f"Models not saved: accuracy {final_accuracy:.4f} below threshold {threshold:.4f}")
+        
         # Extract layer outputs if enabled
         layer_extraction_config = self.config.get('layer_extraction', {})
         if layer_extraction_config.get('enabled', False):

@@ -1,0 +1,166 @@
+# PyTorch Training Configuration
+model:
+  input_dim: 3  # Set to 3 for torus data
+  # hidden_dims: [32, 64, 32] # Removed as per new requirements
+  num_hidden_layers: 8  # Fixed to 8 layers
+  hidden_dim: 32 # Fixed to 32 neurons
+  output_dim: 1  # Binary classification
+  activation_fn_name: 'relu'
+  output_activation_fn_name: 'sigmoid' # Output layer activation: 'sigmoid', 'softmax', 'none'
+  dropout_rate: 0.0012  # Slightly reduced dropout
+  use_batch_norm: false
+
+training:
+  # General training settings
+  device: 'cpu'       # cpu, cuda or mps
+  epochs: 100 # Temporarily reduced for testing
+  batch_size: 64    # Increased batch size for MPS
+  learning_rate: 0.0015  # Reduced learning rate
+  seed: 42            # Random seed for reproducibility
+
+  # Optimizer settings (example: AdamW)
+  optimizer:
+    name: 'adamw'  # Using AdamW for better regularization
+    weight_decay: 0.000014  # Reduced weight decay
+  
+  # Regularization settings
+  regularization:
+    l1_lambda: 0 #0.0000012  # L1 regularization strength (0.0 = disabled)
+    l2_lambda: 0 #0.0004   # L2 regularization strength (0.0 = disabled)
+
+  # Loss function
+  loss_fn: 'bce' # 'bce' (BinaryCrossEntropy), 'mse' (MeanSquaredError), 'cross_entropy' (CrossEntropyLoss for multi-class)
+
+  # Learning rate scheduler (optional)
+  lr_scheduler:
+    type: 'reduce_on_plateau' # 'reduce_on_plateau', 'step_lr', 'none'
+    factor: 0.01         # More aggressive reduction
+    patience: 15         # Increased patience
+    min_lr: 0.00001
+    verbose: true        # Whether to print learning rate changes
+
+  # Gradient clipping (optional)
+  gradient_clipping:
+    enabled: true
+    max_norm: 0.17        # Reduced max norm
+
+  # Early stopping (optional)
+  early_stopping:
+    enabled: true
+    patience: 40         # Increased patience
+    min_delta: 0.0001    # Minimum change in the monitored quantity to qualify as an improvement
+
+  # Settings for vectorized and parallel training
+  num_networks: 2 # Number of networks to train (for torch_vectorised.py and torch_parallel.py)
+  max_parallel_workers: null  # Will default to os.cpu_count()
+  save_model_threshold: 0.9 # Optional: Minimum accuracy/metric to save a trained model (legacy support)
+
+  # Model saving configuration
+  save_model:
+    enabled: true           # Enable/disable model saving after training
+    threshold: 0.75         # Minimum accuracy required to save the model (0.0-1.0)
+    save_dir: 'results/models'  # Directory where trained models will be saved
+
+data:
+  # General data loading and preprocessing settings
+  type: 'synthetic'    # 'synthetic', 'csv', 'custom_function'
+  path: null           # Path to data file if type is 'csv'
+  data_source: null    # Path to dataset file to load instead of generating synthetic data. If null, use generation function
+  synthetic_type: 'torus' # 'moons' or 'torus'
+  noise: 0           # Reduced noise
+  # For make_classification
+  # n_features: 2
+  # n_classes: 2
+  # For make_regression
+  # n_features_regression: 1
+  # n_targets_regression: 1
+
+  # Original data generation subsection to be preserved
+  generation:
+    n: 4000           # Number of points per torus (reduced for testing)
+    big_radius: 3     # Radius of the larger circle of the torus
+    small_radius: 1   # Radius of the smaller circle (tube) of the torus
+    solid: true      # If true, generate solid tori; if false, hollow (surface-only) tori
+    interior_noise: 0.01 # Noise level for interior points when solid=true (0.05-0.2 recommended)
+
+  # Train/test split options
+  split_ratio: 0.80     # Proportion of the dataset for the training set (e.g., 0.8 for 80% train)
+                               # This replaces the old 'test_size' (0.2 test_size is 0.8 split_ratio)
+  shuffle_data: true   # Whether to shuffle data before splitting
+  random_seed_data: 42 # Random seed for data generation and splitting
+                               # This replaces the old 'random_seed' for splitting consistency.
+
+# Layer extraction settings
+layer_extraction:
+  enabled: false     # If true, extract and save layer outputs
+  output_dir: 'results/layer_outputs'  # Directory to save extracted layer outputs
+  train_test_layer_extraction: false  # If true, extract train and test activations separately for Wasserstein analysis
+  train_test_output_dir: 'results/train_test_layer_outputs'  # Directory for separate train/test activations
+  variable_length_output: true  # If true, save layer outputs without padding (preserves natural dimensions)
+
+# Custom architecture configuration
+custom_architecture:
+  enabled: true  # Set to true to use custom architecture instead of standard MLP
+  input_shape: [3]  # Input shape - [3] for 1D input, [1, 28, 28] for 2D images, etc.
+  
+  # Define layers sequentially
+  # Each layer is processed in order, with automatic shape inference
+  layers:
+    # Example 1: Simple Linear + Conv1D architecture
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+
+    - type: linear
+      out_features: 32
+      activation: relu
+      batch_norm: false
+      dropout: 0.0
+    
+    # Reshape to add channel dimension for conv1d
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
+
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
+
+    - type: reshape
+      shape: [16, 2]  # [channels, length] - 32 features = 16 channels × 2 length
+    
+    - type: conv1d
+      out_channels: 32
+      kernel_size: 2  # Kernel size 2 for length 2 input
+      stride: 1
+      padding: 0  # No padding needed
+      activation: relu
+      batch_norm: false
+    
+    - type: flatten
+    
+    - type: linear
+      out_features: 1
+      activation: sigmoid
+  
+  
+  # Layer extraction settings for custom architectures
+  extract_from_layers: "all"  # "all" or list of layer indices to extract from
+  flatten_conv_activations: true  # Flatten conv activations for homology computation
+  skip_final_layer: true  # Skip extracting the final output layer (dimension 1)

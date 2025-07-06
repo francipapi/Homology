@@ -22,6 +22,8 @@ The project combines machine learning with topological data analysis (TDA) to:
 - Visualize Betti curves showing topological invariants across layers
 - Support multiple training backends (PyTorch, MLX for Apple Silicon)
 - Enable parallel and vectorized training for efficiency
+- **NEW**: Analyze gradient-based similarity measures capturing functional behavior
+- **NEW**: Compare optimization landscapes and learning dynamics between models
 
 ## Project Structure
 
@@ -229,6 +231,33 @@ max_parallel_workers: 4
 ```bash
 ./run_optimization.sh
 ```
+
+### Gradient-Based Similarity Analysis (NEW)
+
+Analyze neural networks through optimization and gradient properties:
+
+```bash
+# Quick analysis
+python scripts/analyze_gradient_similarity.py --quick --visualize
+
+# Comprehensive analysis
+python scripts/analyze_gradient_similarity.py \
+  --track-gradient-flow \
+  --analyze-landscape \
+  --analyze-curvature \
+  --compare-hessian \
+  --compare-ntk \
+  --num-models 4
+```
+
+Features:
+- **Gradient Flow Topology**: Analyze optimization trajectories using Morse theory
+- **Loss Landscape Analysis**: Examine convexity, roughness, and barrier heights
+- **Hessian-Based Similarity**: Compare second-order curvature properties
+- **Neural Tangent Kernel**: Measure function space similarity
+- **Optimization Dynamics**: Track learning behavior and convergence patterns
+
+See `docs/gradient_similarity_guide.md` for detailed documentation.
 
 ## Results and Visualization
 

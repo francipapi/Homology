@@ -74,6 +74,7 @@ class NetworkHomologyComparison:
         self.model_metadata: Dict[str, Any] = {}
         self.persistence_diagrams: Dict[str, Dict[int, np.ndarray]] = {}
         self.distance_matrices: Dict[str, np.ndarray] = {}
+        self.dimension_wise_distances: Dict[str, Dict[int, np.ndarray]] = {}  # Store per-dimension distances
         
     def _load_config(self, config_path: Optional[str] = None) -> Dict[str, Any]:
         """Load configuration from YAML file."""
@@ -88,6 +89,157 @@ class NetworkHomologyComparison:
         with open(config_path, 'r') as f:
             return yaml.safe_load(f)
     
+    def _create_display_names(self, model_paths: List[Path]) -> List[str]:
+        """
+        Create clear display names for models in visualizations.
+        
+        Args:
+            model_paths: List of model file paths
+            
+        Returns:
+            List of display names for visualization
+        """
+        names = []
+        for path in model_paths:
+            name = path.stem  # Get filename without extension
+            
+            # Pattern-based name formatting
+            if name.startswith('random_'):
+                # random_mlp_net_000_default_seed_42 -> "Random MLP #0"
+                # random_custom_net_000_default_seed_42 -> "Random Custom #0"
+                parts = name.split('_')
+                if 'mlp' in name:
+                    arch = 'MLP'
+                elif 'custom' in name:
+                    arch = 'Custom'
+                else:
+                    arch = 'Net'
+                
+                # Extract number
+                for part in parts:
+                    if part.isdigit():
+                        num = int(part)
+                        break
+                else:
+                    num = 0
+                
+                names.append(f"Random {arch} #{num}")
+                
+            elif name.startswith('torch_'):
+                # torch_mlp_acc_0.9857_epoch_100 -> "MLP (acc=98.6%)"
+                # torch_custom_acc_1.0000_epoch_200 -> "Custom (acc=100%)"
+                parts = name.split('_')
+                
+                # Extract architecture
+                if 'mlp' in name:
+                    arch = 'MLP'
+                elif 'custom' in name:
+                    arch = 'Custom'
+                else:
+                    arch = 'Model'
+                
+                # Extract accuracy
+                acc_str = ""
+                for i, part in enumerate(parts):
+                    if part == 'acc' and i + 1 < len(parts):
+                        try:
+                            acc = float(parts[i + 1])
+                            acc_str = f" (acc={acc*100:.1f}%)"
+                        except ValueError:
+                            pass
+                        break
+                
+                # Extract epoch
+                epoch_str = ""
+                for i, part in enumerate(parts):
+                    if part == 'epoch' and i + 1 < len(parts):
+                        try:
+                            epoch = int(parts[i + 1])
+                            epoch_str = f" @{epoch}ep"
+                        except ValueError:
+                            pass
+                        break
+                
+                names.append(f"{arch}{acc_str}{epoch_str}")
+                
+            else:
+                # Fallback: try to create readable name
+                # Replace underscores with spaces and title case
+                readable = name.replace('_', ' ').title()
+                # Limit length
+                if len(readable) > 20:
+                    readable = readable[:17] + "..."
+                names.append(readable)
+        
+        # Check for duplicates and add suffixes if needed
+        seen = {}
+        final_names = []
+        for name in names:
+            if name in seen:
+                seen[name] += 1
+                final_names.append(f"{name} ({seen[name]})")
+            else:
+                seen[name] = 0
+                final_names.append(name)
+        
+        return final_names
+
+    def _infer_mlp_config(self, state_dict: Dict[str, torch.Tensor], model_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Infer MLP configuration from state_dict structure.
+        
+        Args:
+            state_dict: Model state dictionary
+            model_config: Config from saved model (may be incomplete)
+            
+        Returns:
+            Complete configuration dictionary
+        """
+        # Find layer weight tensors
+        layer_weights = {}
+        for key, tensor in state_dict.items():
+            if 'layers.' in key and '.weight' in key:
+                layer_idx = int(key.split('.')[1])
+                layer_weights[layer_idx] = tensor
+        
+        if not layer_weights:
+            # Fallback to config defaults
+            return {
+                'input_dim': model_config.get('input_dim', 3),
+                'num_hidden_layers': model_config.get('num_hidden_layers', 2),
+                'hidden_dim': model_config.get('hidden_dim', 64),
+                'output_dim': model_config.get('output_dim', 1),
+                'activation_fn_name': model_config.get('activation_fn_name', 'relu'),
+                'dropout_rate': model_config.get('dropout_rate', 0.0),
+                'use_batch_norm': model_config.get('use_batch_norm', False)
+            }
+        
+        # Infer dimensions from weight shapes
+        sorted_layers = sorted(layer_weights.keys())
+        first_layer = layer_weights[sorted_layers[0]]
+        last_layer = layer_weights[sorted_layers[-1]]
+        
+        input_dim = first_layer.shape[1]  # Input features
+        output_dim = last_layer.shape[0]  # Output features
+        
+        # Infer hidden dimensions (assume all hidden layers have same size)
+        if len(sorted_layers) > 1:
+            hidden_dim = first_layer.shape[0]  # Hidden layer size
+            num_hidden_layers = len(sorted_layers) - 1  # All layers except output
+        else:
+            hidden_dim = 64  # Default
+            num_hidden_layers = 0
+        
+        return {
+            'input_dim': input_dim,
+            'num_hidden_layers': num_hidden_layers,
+            'hidden_dim': hidden_dim,
+            'output_dim': output_dim,
+            'activation_fn_name': model_config.get('activation_fn_name', 'relu'),
+            'dropout_rate': model_config.get('dropout_rate', 0.0),
+            'use_batch_norm': model_config.get('use_batch_norm', False)
+        }
+
     def find_model_files(self) -> List[Path]:
         """Find all model files based on configuration."""
         models_dir = Path(self.comparison_config['models_dir'])
@@ -127,13 +279,30 @@ class NetworkHomologyComparison:
             # Load checkpoint
             checkpoint = torch.load(model_path, map_location='cpu')
             
-            # Extract config and metadata
+            # Extract config and metadata - handle different config key formats
             config = checkpoint.get('config', {})
+            model_config = None
+            custom_config = None
+            
+            # Try different config key formats
+            if 'model_config' in checkpoint:
+                model_config = checkpoint['model_config']
+            elif 'config' in checkpoint and 'model' in checkpoint['config']:
+                model_config = checkpoint['config']['model']
+            
+            if 'custom_config' in checkpoint:
+                custom_config = checkpoint['custom_config']
+            elif 'config' in checkpoint and 'custom_architecture' in checkpoint['config']:
+                custom_config = checkpoint['config']['custom_architecture']
+            
             metadata = {
                 'path': str(model_path),
                 'parent_dir': model_path.parent.name,
                 'best_validation_accuracy': checkpoint.get('best_validation_accuracy', None),
-                'config': config
+                'final_accuracy': checkpoint.get('final_accuracy', None),
+                'config': config,
+                'model_config': model_config,
+                'custom_config': custom_config
             }
             
             # Determine model type by checking the state dict structure
@@ -153,45 +322,47 @@ class NetworkHomologyComparison:
                     if layer_indices != expected_indices:
                         is_custom = True
                 
-                if is_custom or ('custom_architecture' in config and config.get('custom_architecture', {}).get('enabled', False)):
+                if is_custom or (custom_config is not None and custom_config.get('enabled', False)):
                     # Try to infer custom architecture or use config
-                    if 'custom_architecture' in config:
-                        model = CustomNet(config['custom_architecture'])
+                    if custom_config is not None:
+                        model = CustomNet(custom_config)
                     else:
                         # Fall back to standard MLP if we can't determine custom config
-                        model_config = config.get('model', {})
+                        inferred_config = self._infer_mlp_config(state_dict, model_config or {})
                         model = MLP(
-                            input_dim=model_config.get('input_dim', 3),
-                            num_hidden_layers=model_config.get('num_hidden_layers', 2),
-                            hidden_dim=model_config.get('hidden_dim', 64),
-                            output_dim=model_config.get('output_dim', 1),
-                            activation_fn_name=model_config.get('activation_fn_name', 'relu'),
-                            dropout_rate=model_config.get('dropout_rate', 0.0),
-                            use_batch_norm=model_config.get('use_batch_norm', False)
+                            input_dim=inferred_config['input_dim'],
+                            num_hidden_layers=inferred_config['num_hidden_layers'],
+                            hidden_dim=inferred_config['hidden_dim'],
+                            output_dim=inferred_config['output_dim'],
+                            activation_fn_name=inferred_config['activation_fn_name'],
+                            dropout_rate=inferred_config['dropout_rate'],
+                            use_batch_norm=inferred_config['use_batch_norm']
                         )
                 else:
-                    # Standard MLP
-                    model_config = config.get('model', {})
+                    # Standard MLP - infer architecture from state_dict
+                    inferred_config = self._infer_mlp_config(state_dict, model_config or {})
+                    
                     model = MLP(
-                        input_dim=model_config.get('input_dim', 3),
-                        num_hidden_layers=model_config.get('num_hidden_layers', 2),
-                        hidden_dim=model_config.get('hidden_dim', 64),
-                        output_dim=model_config.get('output_dim', 1),
-                        activation_fn_name=model_config.get('activation_fn_name', 'relu'),
-                        dropout_rate=model_config.get('dropout_rate', 0.0),
-                        use_batch_norm=model_config.get('use_batch_norm', False)
+                        input_dim=inferred_config['input_dim'],
+                        num_hidden_layers=inferred_config['num_hidden_layers'],
+                        hidden_dim=inferred_config['hidden_dim'],
+                        output_dim=inferred_config['output_dim'],
+                        activation_fn_name=inferred_config['activation_fn_name'],
+                        dropout_rate=inferred_config['dropout_rate'],
+                        use_batch_norm=inferred_config['use_batch_norm']
                     )
             else:
                 # Default to MLP if no clear layer structure
-                model_config = config.get('model', {})
+                inferred_config = self._infer_mlp_config(state_dict, model_config or {})
+                
                 model = MLP(
-                    input_dim=model_config.get('input_dim', 3),
-                    num_hidden_layers=model_config.get('num_hidden_layers', 2),
-                    hidden_dim=model_config.get('hidden_dim', 64),
-                    output_dim=model_config.get('output_dim', 1),
-                    activation_fn_name=model_config.get('activation_fn_name', 'relu'),
-                    dropout_rate=model_config.get('dropout_rate', 0.0),
-                    use_batch_norm=model_config.get('use_batch_norm', False)
+                    input_dim=inferred_config['input_dim'],
+                    num_hidden_layers=inferred_config['num_hidden_layers'],
+                    hidden_dim=inferred_config['hidden_dim'],
+                    output_dim=inferred_config['output_dim'],
+                    activation_fn_name=inferred_config['activation_fn_name'],
+                    dropout_rate=inferred_config['dropout_rate'],
+                    use_batch_norm=inferred_config['use_batch_norm']
                 )
             
             # Try to load model weights
@@ -285,6 +456,7 @@ class NetworkHomologyComparison:
         # Initialize distance matrices
         for metric in metrics:
             self.distance_matrices[metric] = np.zeros((n_models, n_models))
+            self.dimension_wise_distances[metric] = {}
         
         # Compute pairwise distances
         total_pairs = n_models * (n_models - 1) // 2
@@ -298,8 +470,6 @@ class NetworkHomologyComparison:
                     # Compute distances using GUDHI backend
                     distances = {}
                     for metric in metrics:
-                        total_distance = 0.0
-                        
                         # Get metric-specific parameters
                         if metric == 'heat':
                             kwargs = {'sigma': metric_params.get('heat_sigma', 0.1)}
@@ -311,30 +481,90 @@ class NetworkHomologyComparison:
                         else:
                             kwargs = {}
                         
-                        # Compute distance for each dimension and sum
-                        max_dim = max(max(diagrams1.keys(), default=0), 
-                                     max(diagrams2.keys(), default=0))
+                        # Get all dimensions that exist in either diagram
+                        all_dims = set(diagrams1.keys()) | set(diagrams2.keys())
                         
-                        for dim in range(max_dim + 1):
+                        # Determine maximum dimension to consider
+                        max_dim_config = self.config.get('network_homology', {}).get('max_dimension', None)
+                        if max_dim_config is not None:
+                            # Filter dimensions based on config
+                            all_dims = {dim for dim in all_dims if dim <= max_dim_config}
+                        
+                        if not all_dims:
+                            # If no dimensions available, distance is 0
+                            distances[metric] = 0.0
+                            continue
+                        
+                        # Compute distance for each dimension
+                        dimension_distances = {}
+                        total_distance = 0.0
+                        
+                        for dim in sorted(all_dims):
                             dgm1 = diagrams1.get(dim, np.empty((0, 2)))
                             dgm2 = diagrams2.get(dim, np.empty((0, 2)))
                             
-                            dist = self.distance_calculator.compute_distance(
-                                dgm1, dgm2, metric=metric, **kwargs
-                            )
-                            total_distance += dist
+                            # Ensure diagrams have correct shape
+                            if dgm1.size == 0:
+                                dgm1 = np.empty((0, 2))
+                            if dgm2.size == 0:
+                                dgm2 = np.empty((0, 2))
+                            
+                            # Compute distance for this dimension
+                            try:
+                                dim_dist = self.distance_calculator.compute_distance(
+                                    dgm1, dgm2, metric=metric, **kwargs
+                                )
+                                dimension_distances[dim] = dim_dist
+                                
+                                # Store dimension-wise distance matrix
+                                if dim not in self.dimension_wise_distances[metric]:
+                                    self.dimension_wise_distances[metric][dim] = np.zeros((n_models, n_models))
+                                
+                                # Weight distances by dimension (optional)
+                                weight = metric_params.get(f'dim_{dim}_weight', 1.0)
+                                total_distance += weight * dim_dist
+                                
+                            except Exception as e:
+                                print(f"Warning: Error computing {metric} distance for dimension {dim}: {e}")
+                                dimension_distances[dim] = 0.0
                         
-                        distances[metric] = total_distance
+                        # Apply aggregation method
+                        aggregation_method = metric_params.get('aggregation_method', 'sum')
+                        if aggregation_method == 'sum':
+                            distances[metric] = total_distance
+                        elif aggregation_method == 'max':
+                            distances[metric] = max(dimension_distances.values()) if dimension_distances else 0.0
+                        elif aggregation_method == 'mean':
+                            distances[metric] = np.mean(list(dimension_distances.values())) if dimension_distances else 0.0
+                        elif aggregation_method == 'weighted_sum':
+                            # Already computed above with weights
+                            distances[metric] = total_distance
+                        else:
+                            # Default to sum
+                            distances[metric] = total_distance
                     
                     # Store in matrices (symmetric)
                     for metric in metrics:
                         dist = distances[metric]
                         self.distance_matrices[metric][i, j] = dist
                         self.distance_matrices[metric][j, i] = dist
+                        
+                        # Store dimension-wise distances
+                        for dim, dim_dist in dimension_distances.items():
+                            if dim in self.dimension_wise_distances[metric]:
+                                self.dimension_wise_distances[metric][dim][i, j] = dim_dist
+                                self.dimension_wise_distances[metric][dim][j, i] = dim_dist
                     
                     pbar.update(1)
         
         print(f"Computed {len(metrics)} distance metrics for {n_models} models")
+        
+        # Print dimension information
+        all_dims = set()
+        for diagrams in self.persistence_diagrams.values():
+            all_dims.update(diagrams.keys())
+        if all_dims:
+            print(f"Computed distances for homology dimensions: {sorted(all_dims)}")
     
     def save_distance_matrices(self) -> None:
         """Save computed distance matrices."""
@@ -343,15 +573,25 @@ class NetworkHomologyComparison:
         
         print("\nSaving distance matrices...")
         format_type = self.comparison_config['output']['distance_matrix_format']
+        save_dimension_wise = self.comparison_config['output'].get('save_dimension_wise_matrices', True)
         
+        # Save overall distance matrices
         for metric, matrix in self.distance_matrices.items():
             if format_type == 'npy':
                 np.save(self.matrices_dir / f"{metric}_distance_matrix.npy", matrix)
             elif format_type == 'npz':
+                save_data = {
+                    'distance_matrix': matrix,
+                    'model_names': list(self.persistence_diagrams.keys())
+                }
+                # Add dimension-wise matrices if available
+                if save_dimension_wise and metric in self.dimension_wise_distances:
+                    for dim, dim_matrix in self.dimension_wise_distances[metric].items():
+                        save_data[f'dim_{dim}_matrix'] = dim_matrix
+                
                 np.savez_compressed(
                     self.matrices_dir / f"{metric}_distance_matrix.npz",
-                    distance_matrix=matrix,
-                    model_names=list(self.persistence_diagrams.keys())
+                    **save_data
                 )
             elif format_type == 'csv':
                 # Save as CSV with model names
@@ -359,12 +599,37 @@ class NetworkHomologyComparison:
                 model_names = list(self.persistence_diagrams.keys())
                 df = pd.DataFrame(matrix, index=model_names, columns=model_names)
                 df.to_csv(self.matrices_dir / f"{metric}_distance_matrix.csv")
+                
+                # Save dimension-wise matrices
+                if save_dimension_wise and metric in self.dimension_wise_distances:
+                    for dim, dim_matrix in self.dimension_wise_distances[metric].items():
+                        df_dim = pd.DataFrame(dim_matrix, index=model_names, columns=model_names)
+                        df_dim.to_csv(self.matrices_dir / f"{metric}_distance_matrix_dim_{dim}.csv")
+                        
             elif format_type == 'pickle':
+                save_data = {
+                    'matrix': matrix,
+                    'model_names': list(self.persistence_diagrams.keys())
+                }
+                # Add dimension-wise matrices
+                if save_dimension_wise and metric in self.dimension_wise_distances:
+                    save_data['dimension_wise_matrices'] = self.dimension_wise_distances[metric]
+                
                 with open(self.matrices_dir / f"{metric}_distance_matrix.pkl", 'wb') as f:
-                    pickle.dump({
-                        'matrix': matrix,
-                        'model_names': list(self.persistence_diagrams.keys())
-                    }, f)
+                    pickle.dump(save_data, f)
+        
+        # Save dimension-wise summary
+        if save_dimension_wise:
+            dims_summary = {}
+            for metric in self.dimension_wise_distances:
+                dims_summary[metric] = list(self.dimension_wise_distances[metric].keys())
+            
+            with open(self.matrices_dir / "dimension_summary.json", 'w') as f:
+                json.dump({
+                    'dimensions_computed': dims_summary,
+                    'total_models': len(self.persistence_diagrams),
+                    'metrics': list(self.distance_matrices.keys())
+                }, f, indent=2)
     
     def create_visualizations(self) -> None:
         """Create heatmap visualizations and clustering analysis."""
@@ -378,12 +643,14 @@ class NetworkHomologyComparison:
         
         viz_config = self.comparison_config['visualization']
         
+        # Create clear display names for all models
+        display_names = self._create_display_names(self.model_paths)
+        
         for metric, matrix in self.distance_matrices.items():
             # Create figure
             fig, ax = plt.subplots(figsize=viz_config['figsize'])
             
-            # Create heatmap
-            model_names = [name.split('_')[-1] for name in self.persistence_diagrams.keys()]  # Shorten names
+            # Use improved model names
             
             # Normalize matrix for better visualization
             if matrix.max() > 0:
@@ -402,9 +669,9 @@ class NetworkHomologyComparison:
                 ax=ax
             )
             
-            # Set labels
-            ax.set_xticklabels(model_names, rotation=45, ha='right')
-            ax.set_yticklabels(model_names, rotation=0)
+            # Set labels with improved names
+            ax.set_xticklabels(display_names, rotation=45, ha='right')
+            ax.set_yticklabels(display_names, rotation=0)
             ax.set_title(f'Network Homology Distance Matrix ({metric.capitalize()})')
             
             # Save figure
@@ -454,11 +721,11 @@ class NetworkHomologyComparison:
             # Create dendrogram
             fig, ax = plt.subplots(figsize=(12, 8))
             
-            model_names = [name.split('_')[-1] for name in self.persistence_diagrams.keys()]
+            display_names = self._create_display_names(self.model_paths)
             
             dendrogram(
                 linkage_matrix,
-                labels=model_names,
+                labels=display_names,
                 ax=ax,
                 orientation='top',
                 distance_sort='descending'
@@ -548,13 +815,21 @@ class NetworkHomologyComparison:
         
         print("\nCreating summary report...")
         
+        # Collect dimension information
+        all_dims = set()
+        for diagrams in self.persistence_diagrams.values():
+            all_dims.update(diagrams.keys())
+        
         summary = {
             'overview': {
                 'total_models': len(self.model_paths),
                 'models_processed': len(self.persistence_diagrams),
-                'metrics_computed': list(self.distance_matrices.keys())
+                'metrics_computed': list(self.distance_matrices.keys()),
+                'homology_dimensions': sorted(all_dims) if all_dims else [],
+                'max_dimension': max(all_dims) if all_dims else 0
             },
-            'distance_statistics': {}
+            'distance_statistics': {},
+            'dimension_wise_statistics': {}
         }
         
         # Compute statistics for each metric
@@ -563,12 +838,27 @@ class NetworkHomologyComparison:
             upper_tri = matrix[np.triu_indices_from(matrix, k=1)]
             
             summary['distance_statistics'][metric] = {
-                'mean': float(np.mean(upper_tri)),
-                'std': float(np.std(upper_tri)),
-                'min': float(np.min(upper_tri)),
-                'max': float(np.max(upper_tri)),
-                'median': float(np.median(upper_tri))
+                'aggregated': {
+                    'mean': float(np.mean(upper_tri)),
+                    'std': float(np.std(upper_tri)),
+                    'min': float(np.min(upper_tri)),
+                    'max': float(np.max(upper_tri)),
+                    'median': float(np.median(upper_tri))
+                }
             }
+            
+            # Add dimension-wise statistics
+            if metric in self.dimension_wise_distances:
+                summary['dimension_wise_statistics'][metric] = {}
+                for dim, dim_matrix in self.dimension_wise_distances[metric].items():
+                    dim_upper_tri = dim_matrix[np.triu_indices_from(dim_matrix, k=1)]
+                    summary['dimension_wise_statistics'][metric][f'dimension_{dim}'] = {
+                        'mean': float(np.mean(dim_upper_tri)),
+                        'std': float(np.std(dim_upper_tri)),
+                        'min': float(np.min(dim_upper_tri)),
+                        'max': float(np.max(dim_upper_tri)),
+                        'median': float(np.median(dim_upper_tri))
+                    }
         
         # Add model grouping statistics if available
         model_groups = {}
@@ -583,6 +873,118 @@ class NetworkHomologyComparison:
         # Save summary
         with open(self.output_dir / 'comparison_summary.json', 'w') as f:
             json.dump(summary, f, indent=2)
+        
+        # Print dimension analysis to console
+        self._print_dimension_analysis(summary)
+    
+    def _print_dimension_analysis(self, summary: Dict[str, Any]) -> None:
+        """Print dimension-wise analysis to console."""
+        print("\n" + "=" * 60)
+        print("HOMOLOGY DIMENSION ANALYSIS")
+        print("=" * 60)
+        
+        dims = summary['overview']['homology_dimensions']
+        if not dims:
+            print("No homology dimensions found.")
+            return
+        
+        # Print model information
+        print(f"Total models compared: {len(self.model_paths)}")
+        print(f"Models processed successfully: {len(self.persistence_diagrams)}")
+        
+        print("\nModels analyzed:")
+        display_names = self._create_display_names(self.model_paths)
+        for i, (path, display_name) in enumerate(zip(self.model_paths, display_names)):
+            model_name = f"model_{i:03d}_{path.parent.name}"
+            
+            # Get model metadata if available
+            metadata = self.model_metadata.get(model_name, {})
+            accuracy_info = ""
+            if metadata.get('best_validation_accuracy') is not None:
+                accuracy_info = f" (acc={metadata['best_validation_accuracy']:.3f})"
+            elif metadata.get('final_accuracy') is not None:
+                accuracy_info = f" (acc={metadata['final_accuracy']:.3f})"
+            
+            print(f"  {i+1:2d}. {display_name}{accuracy_info}")
+            print(f"      Path: {path.name}")
+        
+        print(f"\nHomology dimensions computed: {dims}")
+        print(f"Maximum dimension: {summary['overview']['max_dimension']}")
+        
+        # Print pairwise distance summary
+        self._print_pairwise_summary(display_names)
+        
+        # Print dimension-wise statistics
+        self._print_dimension_analysis_stats(summary)
+        
+    def _print_pairwise_summary(self, display_names: List[str]) -> None:
+        """Print a summary of pairwise distances between models."""
+        if not self.distance_matrices:
+            return
+            
+        print("\n" + "-" * 60)
+        print("PAIRWISE DISTANCE SUMMARY")
+        print("-" * 60)
+        
+        # Use the first metric for summary
+        first_metric = list(self.distance_matrices.keys())[0]
+        distance_matrix = self.distance_matrices[first_metric]
+        
+        # Find most/least similar pairs
+        n_models = len(display_names)
+        if n_models < 2:
+            return
+            
+        # Get upper triangle indices (avoid diagonal and duplicates)
+        triu_indices = np.triu_indices(n_models, k=1)
+        distances = distance_matrix[triu_indices]
+        
+        if len(distances) == 0:
+            return
+            
+        # Find extremes
+        min_idx = np.argmin(distances)
+        max_idx = np.argmax(distances)
+        
+        min_i, min_j = triu_indices[0][min_idx], triu_indices[1][min_idx]
+        max_i, max_j = triu_indices[0][max_idx], triu_indices[1][max_idx]
+        
+        print(f"Most similar models ({first_metric} distance):")
+        print(f"  {display_names[min_i]} ↔ {display_names[min_j]}")
+        print(f"  Distance: {distances[min_idx]:.4f}")
+        
+        print(f"\nMost dissimilar models ({first_metric} distance):")
+        print(f"  {display_names[max_i]} ↔ {display_names[max_j]}")
+        print(f"  Distance: {distances[max_idx]:.4f}")
+        
+        print(f"\nOverall distance statistics ({first_metric}):")
+        print(f"  Mean: {np.mean(distances):.4f}")
+        print(f"  Std:  {np.std(distances):.4f}")
+        print(f"  Range: [{np.min(distances):.4f}, {np.max(distances):.4f}]")
+
+    def _print_dimension_analysis_stats(self, summary: Dict[str, Any]) -> None:
+        """Print dimension-wise statistics."""
+        # Print dimension-wise statistics
+        if 'dimension_wise_statistics' in summary:
+            for metric, dim_stats in summary['dimension_wise_statistics'].items():
+                print(f"\n{metric.upper()} DISTANCE BY DIMENSION:")
+                print("-" * 40)
+                
+                for dim_key, stats in dim_stats.items():
+                    dim_num = dim_key.replace('dimension_', '')
+                    print(f"  Dimension {dim_num}:")
+                    print(f"    Mean: {stats['mean']:.6f}")
+                    print(f"    Std:  {stats['std']:.6f}")
+                    print(f"    Range: [{stats['min']:.6f}, {stats['max']:.6f}]")
+                
+                # Compare with aggregated
+                agg_stats = summary['distance_statistics'][metric]['aggregated']
+                print(f"  Aggregated (all dimensions):")
+                print(f"    Mean: {agg_stats['mean']:.6f}")
+                print(f"    Std:  {agg_stats['std']:.6f}")
+                print(f"    Range: [{agg_stats['min']:.6f}, {agg_stats['max']:.6f}]")
+        
+        print("=" * 60)
     
     def run(self) -> None:
         """Run the complete comparison pipeline."""

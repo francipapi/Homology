@@ -7,11 +7,11 @@ network_homology:
   
   # Tracking and alignment settings
   alignment:
-    mode: "step"  # Options: "epoch", "step"
+    mode: "epoch"  # Options: "epoch", "step"
                   # - "epoch": Track homology at the end of each epoch
                   # - "step": Track homology every N training steps (better temporal resolution)
     
-    validation_interval: 500  # Track every N epochs/steps (depending on mode above)
+    validation_interval: 1  # Track every N epochs/steps (depending on mode above)
                             # For epoch mode: 1 = every epoch, 2 = every 2 epochs, etc.
                             # For step mode: 50 = every 50 steps, 100 = every 100 steps, etc.
                             # Lower values = more measurements but slower training
@@ -73,7 +73,7 @@ network_homology:
   
   # Simplicial complex settings
   simplicial_complex:
-    max_dimension: 2  # Maximum homology dimension to compute
+    max_dimension: 3  # Maximum homology dimension to compute
                      # Options: 0, 1, 2, 3, ...
                      # - 0: Only connected components (H0)
                      # - 1: Loops/cycles (H0, H1) - most common
@@ -84,13 +84,21 @@ network_homology:
                          # After normalization, weights > this value are excluded
                          # Common values: 0.5, 1.0, 1.5
     
-    backend: "gudhi"  # Options: "gudhi", "flagser", "auto"
+    backend: "flagser"  # Options: "gudhi", "flagser", "auto" (flagser_legacy)
                      # - "gudhi": General purpose, handles undirected complexes
                      # - "flagser": Optimized for directed flag complexes (if available)
                      # - "auto": Automatically select best available
     
     fallback_backend: "auto"  # Fallback if primary backend fails
                              # Options: "gudhi", "flagser", "auto"
+                             
+    # Parallel processing settings
+    n_jobs: -1  # Number of parallel jobs for persistence computation
+               # Options: -1 (all CPUs), 1 (single-threaded), 2-12 (specific number)
+               # - -1: Use all available CPU cores (recommended for performance)
+               # - 1: Single-threaded (use if memory constrained)
+               # - N: Use N CPU cores (for custom control)
+               # Note: Only applies to giotto-tda flagser backend
   
   # Persistence computation
   persistence:
@@ -100,9 +108,9 @@ network_homology:
                     # - "flagser": Force Flagser for persistence computation
     
     epsilon_filtering: null  # Filter edges with distance > epsilon (nn-evolution compatibility)
-                            # Common values: null (disabled), 1.5, 1.0, 0.8
-                            # Lower = more restrictive filtering (0.6)
-                            # Use null to disable filtering for network comparison
+                              # Common values: null (disabled), 0.001, 0.01, 0.1
+                              # Lower = more restrictive filtering (0.6 is the value used in the nn-evolution paper)
+                              # Use null to disable filtering for network comparison
     
     max_edge_weight: 1.0  # Maximum edge weight constraint
                          # Used to replace infinite persistence values
@@ -203,7 +211,7 @@ network_homology:
                   # - true: Enable network comparison functionality
                   # - false: Disable comparison features
     
-    models_dir: "results/homology_training"  # Directory containing model.pt files
+    models_dir: "results/models"  # Directory containing model.pt files
                                            # Can be absolute or relative path
     
     output_dir: "results/network_homology_comparison"  # Output directory for comparison results
@@ -225,8 +233,8 @@ network_homology:
                      # Useful for limiting computation time during testing
                      # Common values: 10, 20, 50, null
     
-    model_filter: "model.pt"  # File pattern for model files
-                             # Examples: "model.pt", "*.pt", "mlp_*.pt"
+    model_filter: "*.pth"  # File pattern for model files
+                             # Examples: "model.pt", "*.pt", "mlp_*.pt", "*.pth"
     
     # Batch processing for memory efficiency
     batch_size: 50  # Process models in batches to save memory
